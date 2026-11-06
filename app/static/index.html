@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CrossBorder Ops Agent · 跨境电商运营多智能体</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <div class="logo">CB</div>
+    <div class="brand-text">
+      <h1>CrossBorder Ops Agent</h1>
+      <p>跨境电商运营 · 7 Stage 全链路诊断</p>
+    </div>
+  </div>
+  <div class="topbar-right">
+    <span class="badge" id="llm-badge">检测中…</span>
+    <button class="btn btn-primary" id="run-btn">
+      <span class="btn-label">运行全链路</span>
+      <span class="spinner" hidden></span>
+    </button>
+  </div>
+</header>
+
+<main>
+  <!-- 运行摘要 -->
+  <section class="summary" id="summary">
+    <div class="empty-state">
+      <h2>一条流水线，从「这个类目能不能做」到「广告该怎么调」</h2>
+      <p>点击右上角「运行全链路」，用内置的 Shopee 巴西站滑板车数据跑一遍完整诊断。</p>
+      <div class="principles">
+        <div class="principle"><b>01</b><span>数字全部由脚本计算，模型不许心算</span></div>
+        <div class="principle"><b>02</b><span>缺字段直接阻塞，绝不编造参数</span></div>
+        <div class="principle"><b>03</b><span>诊断结论回流上游，改完可复测</span></div>
+      </div>
+
+      <div class="preview-title">七个环节，一条闭环</div>
+      <div class="stage-preview">
+        <div class="pp"><b>01</b><span>市场调研</span><em>该不该进</em></div>
+        <div class="pp-arrow">→</div>
+        <div class="pp"><b>02</b><span>选品定价</span><em>能赚多少</em></div>
+        <div class="pp-arrow">→</div>
+        <div class="pp"><b>03</b><span>Listing</span><em>能不能搜到</em></div>
+        <div class="pp-arrow">→</div>
+        <div class="pp"><b>04</b><span>主图</span><em>九图规划</em></div>
+        <div class="pp-arrow">→</div>
+        <div class="pp"><b>05</b><span>短视频</span><em>25秒讲清</em></div>
+        <div class="pp-split">
+          <div class="pp"><b>06</b><span>广告诊断</span><em>谁在失血</em></div>
+          <div class="pp"><b>07</b><span>评论归因</span><em>哪条能救</em></div>
+        </div>
+      </div>
+      <p class="preview-note">06 / 07 的结论会回指 03 / 04，形成「诊断 → 回改 → 复测」的闭环</p>
+    </div>
+  </section>
+
+  <!-- 流水线 -->
+  <section class="pipeline-wrap" id="pipeline-wrap" hidden>
+    <div class="pipeline" id="pipeline"></div>
+  </section>
+
+  <!-- 工作区 -->
+  <div class="workspace" id="workspace" hidden>
+    <section class="detail" id="detail"></section>
+    <aside class="side">
+      <div class="panel" id="backflow-panel">
+        <div class="panel-head"><h3>闭环回流</h3><span class="hint">诊断 → 回改 → 复测</span></div>
+        <div class="panel-body" id="backflow"><p class="muted">运行后显示</p></div>
+      </div>
+      <div class="panel">
+        <div class="panel-head"><h3>运行历史</h3><span class="hint" id="history-count"></span></div>
+        <div class="panel-body" id="history"><p class="muted">暂无记录</p></div>
+      </div>
+    </aside>
+  </div>
+</main>
+
+<footer>
+  <span>所有指标可溯源至 <code>app/core/metrics.py</code> · 平台规则快照需发布前复核</span>
+</footer>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

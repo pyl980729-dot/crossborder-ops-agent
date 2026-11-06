@@ -1,0 +1,43 @@
+sku,title,brand,seller,price,monthly_sales,rating,review_count,config,is_new_seller
+SC-1000,Scooter Dobrável 500W/15Ah VoltRide,VoltRide,seller_22,295.16,2650,4.7,280,350W/7.5Ah,0
+SC-1001,Patinete Elétrico 500W/10Ah VoltRide,VoltRide,seller_23,274.81,535,3.5,260,800W/20Ah,0
+SC-1002,Scooter Elétrico Adulto 500W/10Ah CasaMove,CasaMove,seller_03,271.13,594,3.9,320,800W/15Ah,1
+SC-1003,Scooter Elétrico Adulto 800W/15Ah VoltRide,VoltRide,seller_14,303.25,4191,4.0,857,500W/10Ah,0
+SC-1004,Scooter Elétrico Adulto 500W/10Ah UrbanGlide,UrbanGlide,seller_12,309.34,2147,4.4,888,350W/7.5Ah,1
+SC-1005,Patinete Elétrico 500W/10Ah VoltRide,VoltRide,seller_03,233.45,1029,3.7,411,500W/10Ah,0
+SC-1006,Patinete 500W 500W/15Ah SpeedOne,SpeedOne,seller_10,230.7,366,4.4,135,800W/15Ah,1
+SC-1007,Scooter Dobrável 500W/15Ah VoltRide,VoltRide,seller_22,189.67,1480,4.4,497,500W/15Ah,0
+SC-1008,Patinete 500W 500W/10Ah MoviPro,MoviPro,seller_12,630.67,575,4.5,79,500W/15Ah,0
+SC-1009,Scooter Dobrável 800W/15Ah MoviPro,MoviPro,seller_24,399.97,2600,4.2,443,800W/20Ah,0
+SC-1010,Patinete 500W 800W/20Ah VoltRide,VoltRide,seller_21,334.82,5371,4.6,2548,500W/10Ah,0
+SC-1011,Patinete Elétrico 800W/20Ah SpeedOne,SpeedOne,seller_24,261.0,308,4.2,118,500W/15Ah,0
+SC-1012,Patinete 500W 800W/15Ah VoltRide,VoltRide,seller_25,261.88,203,4.1,88,500W/15Ah,0
+SC-1013,Patinete 500W 350W/7.5Ah MoviPro,MoviPro,seller_14,214.55,530,4.4,178,500W/10Ah,1
+SC-1014,Scooter Dobrável 500W/10Ah MoviPro,MoviPro,seller_24,259.74,407,3.5,204,800W/20Ah,0
+SC-1015,Scooter Elétrico Adulto 500W/15Ah Generic,Generic,seller_02,317.1,2227,4.6,947,500W/15Ah,0
+SC-1016,Patinete 500W 800W/20Ah VoltRide,VoltRide,seller_08,820.33,781,3.7,136,350W/7.5Ah,1
+SC-1017,Patinete 500W 350W/7.5Ah VoltRide,VoltRide,seller_01,254.39,495,4.1,120,800W/15Ah,0
+SC-1018,Scooter Dobrável 350W/7.5Ah VoltRide,VoltRide,seller_04,213.53,1484,4.0,317,500W/10Ah,0
+SC-1019,Scooter Dobrável 800W/15Ah MoviPro,MoviPro,seller_23,196.66,818,3.8,363,800W/15Ah,0
+SC-1020,Patinete 500W 800W/20Ah SpeedOne,SpeedOne,seller_05,311.31,2522,4.1,1411,500W/10Ah,1
+SC-1021,Patinete 500W 800W/15Ah MoviPro,MoviPro,seller_15,237.25,648,4.2,98,500W/15Ah,0
+SC-1022,Patinete Elétrico 800W/20Ah MoviPro,MoviPro,seller_07,226.27,108,4.2,54,800W/15Ah,1
+SC-1023,Patinete 500W 500W/10Ah ZetaWheel,ZetaWheel,seller_17,206.98,113,4.2,16,800W/20Ah,0
+SC-1024,Scooter Dobrável 350W/7.5Ah MoviPro,MoviPro,seller_05,225.5,769,3.7,398,800W/20Ah,0
+SC-1025,Patinete 500W 800W/20Ah VoltRide,VoltRide,seller_09,848.6,657,3.8,204,500W/10Ah,1
+SC-1026,Patinete 500W 800W/20Ah MoviPro,MoviPro,seller_12,495.6,129,4.8,38,500W/15Ah,1
+SC-1027,Scooter Dobrável 350W/7.5Ah UrbanGlide,UrbanGlide,seller_16,794.19,79,4.1,26,350W/7.5Ah,0
+SC-1028,Patinete 500W 800W/20Ah VoltRide,VoltRide,seller_10,358.41,2700,4.8,729,500W/10Ah,0
+SC-1029,Scooter Dobrável 800W/15Ah VoltRide,VoltRide,seller_02,574.69,1446,4.6,660,800W/15Ah,1
+SC-1030,Scooter Dobrável 800W/15Ah Generic,Generic,seller_15,672.47,415,4.2,101,350W/7.5Ah,0
+SC-1031,Scooter Elétrico Adulto 500W/15Ah VoltRide,VoltRide,seller_13,327.47,5082,4.8,1784,500W/10Ah,0
+SC-1032,Patinete 500W 800W/20Ah VoltRide,VoltRide,seller_18,651.89,424,4.3,195,350W/7.5Ah,0
+SC-1033,Patinete Elétrico 350W/7.5Ah MoviPro,MoviPro,seller_14,392.8,1752,4.5,1014,800W/15Ah,0
+SC-1034,Patinete 500W 350W/7.5Ah VoltRide,VoltRide,seller_08,341.96,1472,4.3,522,800W/15Ah,0
+SC-1035,Scooter Elétrico Adulto 500W/15Ah MoviPro,MoviPro,seller_16,268.67,531,4.3,170,500W/10Ah,0
+SC-1036,Patinete Elétrico 500W/15Ah VoltRide,VoltRide,seller_19,384.66,1222,4.5,543,500W/10Ah,0
+SC-1037,Patinete Elétrico 500W/15Ah SpeedOne,SpeedOne,seller_09,469.07,681,4.2,91,350W/7.5Ah,0
+SC-1038,Scooter Elétrico Adulto 350W/7.5Ah VoltRide,VoltRide,seller_04,375.74,2956,4.3,676,500W/10Ah,0
+SC-1039,Scooter Dobrável 500W/10Ah MoviPro,MoviPro,seller_11,336.36,1652,4.7,465,500W/15Ah,1
+SC-1040,Patinete 500W 500W/10Ah MoviPro,MoviPro,seller_11,312.31,2252,3.9,1286,800W/15Ah,1
+SC-1041,Scooter Elétrico Adulto 800W/20Ah ZetaWheel,ZetaWheel,seller_01,739.67,349,4.7,99,500W/15Ah,0

@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+*.py[cod]
+data/app.db
+.env
+.DS_Store
+.idea/
+.vscode/
+
+# 求职材料（不随公开仓库分发）
+RESUME.md
