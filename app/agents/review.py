@@ -8,7 +8,7 @@
 from __future__ import annotations
 
 from app.agents.base import StageAgent, action, feedback, fmt_pct, insight
-from app.core import metrics as M
+from app.core import config, metrics as M
 from app.core.contracts import StageResult
 
 # 八类归因 → 修补动作（这是运营 SOP 里最值钱的一张表）
@@ -28,6 +28,7 @@ class ReviewAgent(StageAgent):
     key = "review"
 
     def _run(self, payload: dict) -> StageResult:
+        cfg = config.load_config(payload.get("platform"), payload.get("thresholds"))
         agg = M.review_aggregate(payload["reviews"])
 
         insights = []
@@ -39,7 +40,7 @@ class ReviewAgent(StageAgent):
             insight(
                 f"共 {agg['total']} 条评论，好评率 {fmt_pct(agg['good_rate'])}，"
                 f"差评 {agg['bad_count']} 条（{fmt_pct(agg['bad_rate'])}），平均分 {agg['avg_rating']}。",
-                "good" if agg["good_rate"] >= 0.85 else "warn",
+                "good" if agg["good_rate"] >= cfg.get("review.good_rate_target") else "warn",
                 "review_aggregate.good_rate",
             )
         )
@@ -50,7 +51,7 @@ class ReviewAgent(StageAgent):
                     f"差评中 {agg['fixable_count']} 条属于「改文案/补图就能消掉」的类型，"
                     f"可修复率 {fmt_pct(agg['fixable_rate'])}——这部分几乎零成本，"
                     f"剩下 {agg['bad_count'] - agg['fixable_count']} 条才是供应链要处理的。",
-                    "good" if agg["fixable_rate"] >= 0.5 else "warn",
+                    "good" if agg["fixable_rate"] >= cfg.get("review.fixable_rate_target") else "warn",
                     "review_aggregate.fixable_rate",
                 )
             )
@@ -93,7 +94,7 @@ class ReviewAgent(StageAgent):
             fix_target, fix_how, back_to = FIX_PLAYBOOK.get(cat, ("详情页", "补充说明", "listing"))
             actions.append(
                 action(
-                    "P0" if item["share"] >= 0.3 else "P1",
+                    "P0" if item["share"] >= cfg.get("review.p0_share") else "P1",
                     fix_target,
                     fix_how,
                     f"该类差评 {item['count']} 条，占 {fmt_pct(item['share'])}，且属于内容可修复类型",

@@ -22,6 +22,7 @@
     <button class="tab active" data-view="flow">工作流</button>
     <button class="tab" data-view="auto">自动化</button>
     <button class="tab" data-view="data">数据</button>
+    <button class="tab" data-view="config">阈值</button>
   </nav>
 
   <div class="topbar-right">
@@ -185,6 +186,30 @@
         <span class="hint" id="dataset-count"></span>
       </div>
       <div class="panel-body" id="dataset-list"><p class="muted">还没有上传任何数据</p></div>
+    </div>
+  </div>
+  <!-- ================= 阈值视图 ================= -->
+  <div id="view-config" hidden>
+    <div class="panel">
+      <div class="panel-head">
+        <h3>判断阈值</h3>
+        <span class="hint">改完立即生效，下次运行使用</span>
+      </div>
+      <div class="cfg-toolbar">
+        <label>按平台查看
+          <select id="cfg-platform">
+            <option value="">通用默认</option>
+            <option value="shopee_br">Shopee 巴西站</option>
+            <option value="mercadolivre">Mercado Livre</option>
+            <option value="amazon">Amazon</option>
+            <option value="tiktok_shop">TikTok Shop</option>
+            <option value="shopify">Shopify</option>
+          </select>
+        </label>
+        <span class="muted" style="font-size:11.5px">同一套阈值套所有平台会得出反向结论 —— Amazon 的 CTR 只有 0.4%，用 2% 去卡会把正常广告全判成失败。</span>
+        <button class="btn btn-sm" id="cfg-reset" style="margin-left:auto">全部恢复默认</button>
+      </div>
+      <div class="panel-body" id="config-groups"><p class="muted">加载中…</p></div>
     </div>
   </div>
 </main>

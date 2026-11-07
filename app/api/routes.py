@@ -6,6 +6,7 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 
 from app import db
+from app.core import config as app_config
 from app.core import datasets as ds
 from app.core.contracts import STAGE_ORDER, contract_catalog
 from app.core.logging import get_logger
@@ -263,3 +264,46 @@ def run_from_datasets(req: RunFromDatasets) -> dict:
         len(products or []), len(ads or []), len(reviews or []),
     )
     return run_stages(payload)
+
+
+# ---------------------------------------------------------------------------
+# 阈值配置
+# ---------------------------------------------------------------------------
+
+@router.get("/config")
+def get_config(platform: str | None = None) -> dict:
+    """当前生效的阈值清单，每项带来源（请求/界面/平台/默认）。"""
+    cfg = app_config.load_config(platform)
+    groups: dict[str, list] = {}
+    for item in cfg.as_list():
+        groups.setdefault(item["group"], []).append(item)
+    return {
+        "platform": platform or "",
+        "groups": [{"name": k, "items": v} for k, v in groups.items()],
+        "overrides": db.get_settings(),
+        "platform_overrides": app_config.PLATFORM_OVERRIDES,
+    }
+
+
+class ConfigUpdate(BaseModel):
+    values: dict
+
+
+@router.put("/config")
+def update_config(req: ConfigUpdate) -> dict:
+    """更新覆蓋值。传 null 表示恢复该项默认。"""
+    result = app_config.update_overrides(req.values)
+    log.info("config updated: %s", result)
+    if result["rejected"]:
+        raise HTTPException(
+            status_code=400,
+            detail=f"以下配置项非法或超出范围：{', '.join(result['rejected'])}",
+        )
+    return result
+
+
+@router.post("/config/reset")
+def reset_config() -> dict:
+    app_config.reset_all()
+    log.info("config reset to defaults")
+    return {"reset": True}

@@ -89,7 +89,12 @@ def market_summary(products: Sequence[dict]) -> dict:
     }
 
 
-def concentration(products: Sequence[dict], key: str = "brand") -> dict:
+def concentration(
+    products: Sequence[dict],
+    key: str = "brand",
+    cr3_high: float = 0.6,
+    cr3_mid: float = 0.4,
+) -> dict:
     """集中度：CR3 / CR5 / CR10 / HHI，判断新店切入难度。
 
     口径说明：按「销量份额」而非「商品数份额」计算——一个品牌挂 50 个链接
@@ -119,9 +124,9 @@ def concentration(products: Sequence[dict], key: str = "brand") -> dict:
     # 这是很多「AI 类目分析」翻车的地方：把恒等式当成结论。
     enough_brands = len(shares) >= 10
     cr3 = cr(3)
-    if cr3 > 0.6:
+    if cr3 >= cr3_high:
         verdict = "高度集中"
-    elif cr3 > 0.4:
+    elif cr3 >= cr3_mid:
         verdict = "中度集中"
     else:
         verdict = "分散"
@@ -152,7 +157,13 @@ def _nice_step(raw: float) -> float:
     return 10 ** (exp + 1)
 
 
-def price_bands(products: Sequence[dict], target_bands: int = 8) -> list[dict]:
+def price_bands(
+    products: Sequence[dict],
+    target_bands: int = 8,
+    blue_threshold: float = 1.2,
+    red_threshold: float = 0.8,
+    min_band_products: int = 3,
+) -> list[dict]:
     """价格带分析 —— 找「销量高 + 供给少」的带，不是找销量最高的带。
 
     关键指标 opportunity = 销量份额 / 商品数份额：
@@ -210,11 +221,12 @@ def price_bands(products: Sequence[dict], target_bands: int = 8) -> list[dict]:
     # 打标签：只给最强的一个贴蓝海，最弱的一个贴红海。
     # 样本 <3 个链接的带不参与「红海」判定 —— 2 个链接的样本量不足以下结论。
     if bands:
-        eligible = [b for b in bands if b["product_count"] >= 3] or bands
+        eligible = [b for b in bands if b["product_count"] >= min_band_products] or bands
         best = max(eligible, key=lambda b: b["opportunity"])
         worst = min(eligible, key=lambda b: b["opportunity"])
-        best["tag"] = "blue_ocean"
-        if worst is not best and worst["opportunity"] < 0.8:
+        if best["opportunity"] >= blue_threshold:
+            best["tag"] = "blue_ocean"
+        if worst is not best and worst["opportunity"] < red_threshold:
             worst["tag"] = "red_ocean"
         for b in bands:
             b.setdefault("tag", "neutral")
@@ -416,6 +428,7 @@ def grade_campaign(
     ctr_bench: float = 0.02,
     min_impressions: int = 1000,
     min_clicks: int = 30,
+    bleeding_ratio: float = 0.5,
 ) -> dict:
     """广告分级 —— 固定诊断顺序，不可跳步。
 
@@ -444,7 +457,7 @@ def grade_campaign(
     if breakeven_roas <= 0:
         return {"level": "P1", "reason": "贡献毛利为负，先修定价再谈广告", "stage": "negative_margin", "backflow": "strategy"}
 
-    if m["roas"] < breakeven_roas * 0.5:
+    if m["roas"] < breakeven_roas * bleeding_ratio:
         return {
             "level": "P0",
             "reason": f"ROAS {m['roas']} < 盈亏线 {breakeven_roas} 的一半，每单都在亏现金",
@@ -476,6 +489,9 @@ def diagnose_ads(
     breakeven_roas: float,
     target_roas: float,
     ctr_bench: float = 0.02,
+    min_impressions: int = 1000,
+    min_clicks: int = 30,
+    bleeding_ratio: float = 0.5,
 ) -> dict:
     """整张广告报表的诊断：逐组分级 + 汇总。"""
     if not rows:
@@ -484,7 +500,12 @@ def diagnose_ads(
     campaigns = []
     for row in rows:
         m = funnel_row(row, num(row.get("price", 0), "price"))
-        m["grade"] = grade_campaign(m, breakeven_roas, target_roas, ctr_bench)
+        m["grade"] = grade_campaign(
+            m, breakeven_roas, target_roas, ctr_bench,
+            min_impressions=min_impressions,
+            min_clicks=min_clicks,
+            bleeding_ratio=bleeding_ratio,
+        )
         campaigns.append(m)
 
     total_cost = sum(c["cost"] for c in campaigns)
@@ -587,7 +608,13 @@ def review_aggregate(reviews: Sequence[dict]) -> dict:
 # 五、Listing 校验
 # --------------------------------------------------------------------------
 
-def title_lint(title: str, title_max: int, front_weight: int, keywords: Sequence[str] = ()) -> dict:
+def title_lint(
+    title: str,
+    title_max: int,
+    front_weight: int,
+    keywords: Sequence[str] = (),
+    stuffing_limit: int = 3,
+) -> dict:
     """标题硬校验：字符数、前置权重区、关键词覆盖、堆砌检测。"""
     title = (title or "").strip()
     chars = len(title)
@@ -596,10 +623,10 @@ def title_lint(title: str, title_max: int, front_weight: int, keywords: Sequence
     hits = [k for k in keywords if k and k.lower() in title.lower()]
     missing = [k for k in keywords if k and k.lower() not in title.lower()]
 
-    # 堆砌：同一实词重复 3 次以上
+    # 堆砌：同一实词重复达到 stuffing_limit 次
     words = [w for w in title.replace("-", " ").replace("|", " ").split() if len(w) > 2]
     counter = Counter(w.lower() for w in words)
-    stuffed = [w for w, c in counter.items() if c >= 3]
+    stuffed = [w for w, c in counter.items() if c >= stuffing_limit]
 
     # 全大写/感叹号等营销噪音
     noise = []

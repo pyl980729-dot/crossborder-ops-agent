@@ -11,7 +11,7 @@
 from __future__ import annotations
 
 from app.agents.base import StageAgent, action, fmt_money, fmt_pct, insight
-from app.core import metrics as M
+from app.core import config, metrics as M
 from app.core.contracts import StageResult
 from app.core.platforms import get_platform
 
@@ -21,14 +21,15 @@ class StrategyAgent(StageAgent):
 
     def _run(self, payload: dict) -> StageResult:
         platform = get_platform(payload.get("platform"))
+        cfg = config.load_config(payload.get("platform"), payload.get("thresholds"))
         price = float(payload["target_price"])
         cost = float(payload["product_cost"])
 
         commission = float(payload.get("commission_rate", platform.commission_rate))
         tax = float(payload.get("tax_rate", platform.tax_rate))
-        return_rate = float(payload.get("return_rate", 0.02))
+        return_rate = float(payload.get("return_rate", cfg.get("strategy.default_return_rate")))
         shipping = float(payload.get("shipping_cost", 0.0))
-        target_margin = float(payload.get("target_margin", 0.2))
+        target_margin = float(payload.get("target_margin", cfg.get("strategy.target_margin")))
 
         model = M.pricing_model(
             price=price,

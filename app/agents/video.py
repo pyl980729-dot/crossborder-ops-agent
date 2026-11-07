@@ -12,6 +12,7 @@ import json
 import re
 
 from app.agents.base import StageAgent, action, insight
+from app.core import config
 from app.core.contracts import StageResult
 from app.core.llm import provider_info, try_generate
 from app.core.platforms import get_platform
@@ -27,6 +28,10 @@ class VideoAgent(StageAgent):
 
     def _run(self, payload: dict) -> StageResult:
         platform = get_platform(payload.get("platform"))
+        cfg = config.load_config(payload.get("platform"), payload.get("thresholds"))
+        chars_per_sec = cfg.get("video.chars_per_sec_zh")
+        syllables_per_sec = cfg.get("video.syllables_per_sec")
+        too_thin_ratio = cfg.get("video.too_thin_ratio")
         name = str(payload["product_name"]).strip()
         main_point = str(payload["main_point"]).strip()
         duration = int(payload.get("duration") or 25)
@@ -36,7 +41,9 @@ class VideoAgent(StageAgent):
 
         # 模型只改写口播，分镜结构与时长仍由脚本决定 ——
         # 否则模型会把 25 秒的片子写成 60 秒的文案。
-        llm_narr = self._llm_narration(name, main_point, audience, storyboard, platform)
+        llm_narr = self._llm_narration(
+            name, main_point, audience, storyboard, platform, chars_per_sec
+        )
         llm_used = bool(llm_narr)
         if llm_narr:
             for seg in storyboard:
@@ -44,23 +51,27 @@ class VideoAgent(StageAgent):
                 if text:
                     seg["narration"] = text
 
-        total_seconds, narration, cjk_chars, latin_chars, needed = self._measure(storyboard)
+        total_seconds, narration, cjk_chars, latin_chars, needed = self._measure(
+            storyboard, chars_per_sec, syllables_per_sec
+        )
 
         # 模型写的文案如果塞不进时长，整体回落到规则文案 ——
         # 不能出现「接了大模型，结果比原来更差」。
         if llm_used and needed > total_seconds * 1.05:
             storyboard = self._build_storyboard(name, main_point, audience, duration)
             llm_used = False
-            total_seconds, narration, cjk_chars, latin_chars, needed = self._measure(storyboard)
+            total_seconds, narration, cjk_chars, latin_chars, needed = self._measure(
+                storyboard, chars_per_sec, syllables_per_sec
+            )
 
         over = total_seconds > duration
         too_fast = needed > total_seconds * 1.05
-        too_thin = needed < total_seconds * 0.7
+        too_thin = needed < total_seconds * too_thin_ratio
 
         insights = [
             insight(
-                f"口播 {cjk_chars} 个汉字（按 {CHARS_PER_SEC_ZH:.0f} 字/秒）+ {latin_chars} 个拉丁字符"
-                f"（按 {SYLLABLES_PER_SEC:.0f} 音节/秒）≈ {needed:.1f} 秒，"
+                f"口播 {cjk_chars} 个汉字（按 {chars_per_sec:.1f} 字/秒）+ {latin_chars} 个拉丁字符"
+                f"（按 {syllables_per_sec:.0f} 音节/秒）≈ {needed:.1f} 秒，"
                 f"分镜总时长 {total_seconds} 秒"
                 + ("，语速偏快需要删词" if too_fast else "，语速正常"),
                 "warn" if too_fast else "good",
@@ -159,7 +170,11 @@ class VideoAgent(StageAgent):
         )
 
     @staticmethod
-    def _measure(storyboard: list[dict]) -> tuple[int, str, int, int, float]:
+    def _measure(
+        storyboard: list[dict],
+        chars_per_sec: float = CHARS_PER_SEC_ZH,
+        syllables_per_sec: float = SYLLABLES_PER_SEC,
+    ) -> tuple[int, str, int, int, float]:
         """统一测算：总时长、合并口播、中文字数、拉丁字符数、所需秒数。
 
         语速口径必须区分语种：中文按「字/秒」，拉丁按「音节/秒」。
@@ -169,7 +184,7 @@ class VideoAgent(StageAgent):
         narration = " ".join(s["narration"] for s in storyboard if s["narration"])
         cjk_chars = sum(1 for c in narration if "\u4e00" <= c <= "\u9fff")
         latin_chars = sum(1 for c in narration if c.isalpha() and not ("\u4e00" <= c <= "\u9fff"))
-        needed = cjk_chars / CHARS_PER_SEC_ZH + latin_chars / SYLLABLES_PER_SEC
+        needed = cjk_chars / chars_per_sec + latin_chars / syllables_per_sec
         return total_seconds, narration, cjk_chars, latin_chars, needed
 
     def _llm_narration(
@@ -179,9 +194,10 @@ class VideoAgent(StageAgent):
         audience: str,
         storyboard: list[dict],
         platform,
+        chars_per_sec: float = CHARS_PER_SEC_ZH,
     ) -> dict[str, str]:
         """让模型写口播，但**字数预算由脚本给定**，不由模型自己估。"""
-        budget = {s["scene"]: max(8, int(s["seconds"] * CHARS_PER_SEC_ZH * 0.9)) for s in storyboard}
+        budget = {s["scene"]: max(8, int(s["seconds"] * chars_per_sec * 0.9)) for s in storyboard}
         plan = "；".join(f"{s['scene']} {s['seconds']}秒（≤{budget[s['scene']]}字）" for s in storyboard)
         total = sum(s["seconds"] for s in storyboard)
 

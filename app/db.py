@@ -35,6 +35,12 @@ CREATE TABLE IF NOT EXISTS runs (
 
 CREATE INDEX IF NOT EXISTS idx_runs_created ON runs (created_at DESC);
 
+CREATE TABLE IF NOT EXISTS settings (
+    key        TEXT PRIMARY KEY,
+    value      TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS datasets (
     id          TEXT PRIMARY KEY,
     kind        TEXT NOT NULL,
@@ -169,6 +175,31 @@ def stats() -> dict:
             "SELECT COUNT(*) AS c FROM runs WHERE trigger = 'scheduler'"
         ).fetchone()["c"]
     return {"total_runs": total, "ok_runs": ok, "scheduled_runs": scheduled}
+
+
+# ---------------------------------------------------------------------------
+# 配置项（阈值覆盖）
+# ---------------------------------------------------------------------------
+
+def get_settings() -> dict[str, str]:
+    with _open() as conn:
+        rows = conn.execute("SELECT key, value FROM settings").fetchall()
+    return {r["key"]: r["value"] for r in rows}
+
+
+def save_settings(values: dict) -> None:
+    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    with _open() as conn:
+        for key, value in values.items():
+            conn.execute(
+                "INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, ?)",
+                (key, str(value), now),
+            )
+
+
+def delete_setting(key: str) -> None:
+    with _open() as conn:
+        conn.execute("DELETE FROM settings WHERE key = ?", (key,))
 
 
 # ---------------------------------------------------------------------------

@@ -12,7 +12,7 @@ import json
 import re
 
 from app.agents.base import StageAgent, action, fmt_pct, insight
-from app.core import metrics as M
+from app.core import config, metrics as M
 from app.core.contracts import StageResult
 from app.core.llm import provider_info, try_generate
 from app.core.platforms import get_platform
@@ -34,6 +34,8 @@ class ListingAgent(StageAgent):
 
     def _run(self, payload: dict) -> StageResult:
         platform = get_platform(payload.get("platform"))
+        cfg = config.load_config(payload.get("platform"), payload.get("thresholds"))
+        stuffing_limit = cfg.get_int("listing.stuffing_limit")
         name = str(payload["product_name"]).strip()
         points = [str(p).strip() for p in payload["selling_points"] if str(p).strip()]
         raw_keywords = payload["keywords"]
@@ -43,7 +45,8 @@ class ListingAgent(StageAgent):
         audience = payload.get("target_audience") or ""
 
         variants = self._compose_titles(
-            name, points, keywords, weighted, specs, audience, platform.title_max
+            name, points, keywords, weighted, specs, audience,
+            platform.title_max, stuffing_limit
         )
 
         # 先问模型要三版，再让脚本逐条验；验不过的直接丢，规则版兜底。
@@ -55,6 +58,7 @@ class ListingAgent(StageAgent):
                 title_max=platform.title_max,
                 front_weight=platform.title_front_weight,
                 keywords=keywords,
+                stuffing_limit=stuffing_limit,
             )
             titles.append({**variant, "lint": lint, "source": "rule"})
 
@@ -248,6 +252,7 @@ class ListingAgent(StageAgent):
                 title_max=platform.title_max,
                 front_weight=platform.title_front_weight,
                 keywords=keywords,
+                stuffing_limit=stuffing_limit,
             )
             if not lint["passed"]:
                 continue  # 超限或堆砌，不收
@@ -315,6 +320,7 @@ class ListingAgent(StageAgent):
         specs: dict,
         audience: str,
         title_max: int = 120,
+        stuffing_limit: int = 3,
     ) -> list[dict]:
         """三个变体：搜索导向 / 转化导向 / 人群导向。
 
@@ -362,7 +368,7 @@ class ListingAgent(StageAgent):
                 if len(candidate) > limit:
                     continue
                 merged = counts(candidate)
-                if any(v >= 3 for v in merged.values()):
+                if any(v >= stuffing_limit for v in merged.values()):
                     continue  # 会触发堆砌校验，跳过
                 text = candidate
             return text

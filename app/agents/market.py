@@ -8,7 +8,7 @@
 from __future__ import annotations
 
 from app.agents.base import StageAgent, action, fmt_money, fmt_pct, insight
-from app.core import metrics as M
+from app.core import config, metrics as M
 from app.core.contracts import StageResult
 from app.core.platforms import get_platform
 
@@ -20,10 +20,21 @@ class MarketAgent(StageAgent):
         products = payload["products"]
         category = payload["category"]
         platform = get_platform(payload.get("platform"))
+        cfg = config.load_config(payload.get("platform"), payload.get("thresholds"))
 
         summary = M.market_summary(products)
-        conc = M.concentration(products, key="brand")
-        bands = M.price_bands(products)
+        conc = M.concentration(
+            products,
+            key="brand",
+            cr3_high=cfg.get("market.cr3_high"),
+            cr3_mid=cfg.get("market.cr3_mid"),
+        )
+        bands = M.price_bands(
+            products,
+            blue_threshold=cfg.get("market.opportunity_blue"),
+            red_threshold=cfg.get("market.opportunity_red"),
+            min_band_products=cfg.get_int("market.min_band_products"),
+        )
         configs = M.config_opportunity(products)
 
         blue = next((b for b in bands if b.get("tag") == "blue_ocean"), None)
@@ -125,7 +136,7 @@ class MarketAgent(StageAgent):
             )
 
         # ---- 结论 ----
-        verdict = self._verdict(conc, blue, summary)
+        verdict = self._verdict(conc, blue, summary, cfg)
         headline = (
             f"{category}：月销 {summary['total_monthly_sales']:,} 件 / GMV {fmt_money(summary['monthly_gmv'])}，"
             f"{conc_label}（{conc['verdict']}）"
@@ -196,7 +207,7 @@ class MarketAgent(StageAgent):
         return result
 
     @staticmethod
-    def _verdict(conc: dict, blue: dict | None, summary: dict) -> dict:
+    def _verdict(conc: dict, blue: dict | None, summary: dict, cfg) -> dict:
         """把三个信号收敛成一个可执行结论。"""
         score = 0
         reasons = []
@@ -205,21 +216,22 @@ class MarketAgent(StageAgent):
             reasons.append("集中度可控")
         else:
             reasons.append("集中度过高")
-        if blue and blue["opportunity"] >= 1.2:
+        if blue and blue["opportunity"] >= cfg.get("market.opportunity_blue"):
             score += 1
             reasons.append(f"{blue['label']} 供不应求")
         if summary["avg_rating"] < 4.2:
             score += 1
             reasons.append("口碑存在改良缺口")
-        if summary["total_monthly_sales"] >= 5000:
+        if summary["total_monthly_sales"] >= cfg.get_int("market.min_monthly_sales"):
             score += 1
             reasons.append("类目容量足够支撑起量")
         else:
             reasons.append("容量偏小")
 
-        if score >= 3:
+        pass_score = cfg.get_int("market.verdict_pass_score")
+        if score >= pass_score:
             decision = "可进，按机会价位差异化切入"
-        elif score == 2:
+        elif score >= pass_score - 1:
             decision = "谨慎进，先小批量测试 4 周"
         else:
             decision = "不建议进，除非有独特供应链优势"

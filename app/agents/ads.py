@@ -12,7 +12,7 @@
 from __future__ import annotations
 
 from app.agents.base import StageAgent, action, feedback, fmt_money, fmt_pct, insight
-from app.core import metrics as M
+from app.core import config, metrics as M
 from app.core.contracts import StageResult
 from app.core.platforms import get_platform
 
@@ -22,11 +22,14 @@ class AdsAgent(StageAgent):
 
     def _run(self, payload: dict) -> StageResult:
         platform = get_platform(payload.get("platform"))
+        # 阈值按「请求 > 界面设置 > 平台预设 > 系统默认」四层合成
+        cfg = config.load_config(payload.get("platform"), payload.get("thresholds"))
         price = float(payload["target_price"])
         cost = float(payload["product_cost"])
         commission = float(payload.get("commission_rate", platform.commission_rate))
         tax = float(payload.get("tax_rate", platform.tax_rate))
-        ctr_bench = float(payload.get("ctr_bench", 0.02))
+        # 保留 payload.ctr_bench 的旧写法，但默认值来自配置层
+        ctr_bench = float(payload.get("ctr_bench", cfg.get("ads.ctr_bench")))
         target_margin = float(payload.get("target_margin", 0.10))
         shipping = float(payload.get("shipping_cost", 0.0))
 
@@ -50,7 +53,15 @@ class AdsAgent(StageAgent):
             row.setdefault("price", price)
             rows.append(row)
 
-        report = M.diagnose_ads(rows, breakeven_roas=breakeven, target_roas=target_roas, ctr_bench=ctr_bench)
+        report = M.diagnose_ads(
+            rows,
+            breakeven_roas=breakeven,
+            target_roas=target_roas,
+            ctr_bench=ctr_bench,
+            min_impressions=cfg.get_int("ads.min_impressions"),
+            min_clicks=cfg.get_int("ads.min_clicks"),
+            bleeding_ratio=cfg.get("ads.bleeding_ratio"),
+        )
         summary = report["summary"]
         campaigns = report["campaigns"]
 
@@ -197,6 +208,10 @@ class AdsAgent(StageAgent):
                     "target_roas": target_roas,
                     "ctr_bench": ctr_bench,
                     "contribution": contribution,
+                    "min_impressions": cfg.get_int("ads.min_impressions"),
+                    "min_clicks": cfg.get_int("ads.min_clicks"),
+                    "bleeding_ratio": cfg.get("ads.bleeding_ratio"),
+                    "ctr_bench_source": cfg.source_label("ads.ctr_bench"),
                 },
                 "platform": {"key": platform.key, "name": platform.name},
             },

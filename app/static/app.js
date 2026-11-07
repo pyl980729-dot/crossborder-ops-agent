@@ -72,6 +72,9 @@
         $("#task-cron").value = btn.dataset.cron;
       });
     });
+
+    $("#cfg-platform").addEventListener("change", loadConfig);
+    $("#cfg-reset").addEventListener("click", resetConfig);
   }
 
   /* ---------------- 运行 ---------------- */
@@ -479,11 +482,97 @@
     $("#view-flow").hidden = name !== "flow";
     $("#view-auto").hidden = name !== "auto";
     $("#view-data").hidden = name !== "data";
+    $("#view-config").hidden = name !== "config";
     if (name === "auto") loadAutomation();
     if (name === "data") {
       initDataView();
       loadDatasets();
     }
+    if (name === "config") loadConfig();
+  }
+
+  /* ================= 阈值配置 ================= */
+  async function loadConfig() {
+    const platform = $("#cfg-platform")?.value || "";
+    try {
+      const data = await api(`/api/config?platform=${encodeURIComponent(platform)}`);
+      renderConfigGroups(data.groups || []);
+    } catch (e) {
+      $("#config-groups").innerHTML = `<p class="muted">加载失败：${esc(e.message)}</p>`;
+    }
+  }
+
+  function renderConfigGroups(groups) {
+    const box = $("#config-groups");
+    if (!groups.length) {
+      box.innerHTML = `<p class="muted">没有可配置项</p>`;
+      return;
+    }
+    box.innerHTML = groups
+      .map(
+        (g) => `<div class="cfg-group">
+          <div class="block-title">${esc(g.name)}</div>
+          ${g.items.map(configRow).join("")}
+        </div>`
+      )
+      .join("");
+
+    box.querySelectorAll(".cfg-control input").forEach((input) => {
+      const row = input.closest(".cfg-row");
+      const key = row.dataset.key;
+      const isRatio = input.dataset.kind === "ratio";
+
+      input.addEventListener("input", () => input.classList.add("dirty"));
+      input.addEventListener("blur", () => saveConfigValue(key, input, isRatio, row));
+      input.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") input.blur();
+      });
+    });
+  }
+
+  function configRow(item) {
+    const isRatio = item.kind === "ratio";
+    const shown = isRatio ? (item.value * 100).toFixed(2).replace(/\.?0+$/, "") : item.value;
+    return `<div class="cfg-row" data-key="${esc(item.key)}">
+      <div class="cfg-info">
+        <b>${esc(item.label)}</b>
+        <span>${esc(item.desc)}</span>
+      </div>
+      <div class="cfg-control">
+        <input type="number" inputmode="decimal" value="${shown}"
+               step="${isRatio ? 0.1 : item.kind === "count" ? 1 : 0.1}" data-kind="${item.kind}">
+        <span class="cfg-unit">${isRatio ? "%" : ""}</span>
+      </div>
+      <div class="cfg-source src-${esc(item.source)}">${esc(item.source_label)}</div>
+    </div>`;
+  }
+
+  async function saveConfigValue(key, input, isRatio, row) {
+    if (!input.classList.contains("dirty")) return;
+    const raw = parseFloat(input.value);
+    if (Number.isNaN(raw)) {
+      alert("请输入数字");
+      loadConfig();
+      return;
+    }
+    const value = isRatio ? raw / 100 : raw;
+    try {
+      await api("/api/config", {
+        method: "PUT",
+        body: JSON.stringify({ values: { [key]: value } }),
+      });
+      input.classList.remove("dirty");
+      loadConfig(); // 重新拉一次，来源标签会从「平台预设」变成「界面设置」
+    } catch (e) {
+      alert(`保存失败：${e.message}`);
+      loadConfig();
+    }
+  }
+
+  async function resetConfig() {
+    if (!confirm("把所有阈值恢复成系统默认？（平台预设也会重新生效）")) return;
+    await api("/api/config/reset", { method: "POST" });
+    loadConfig();
   }
 
   /* ================= 数据接入 ================= */
