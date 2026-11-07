@@ -21,6 +21,7 @@
   <nav class="tabs" id="tabs">
     <button class="tab active" data-view="flow">工作流</button>
     <button class="tab" data-view="auto">自动化</button>
+    <button class="tab" data-view="data">数据</button>
   </nav>
 
   <div class="topbar-right">
@@ -119,6 +120,71 @@
         </div>
         <div class="panel-body" id="cycle-panel"><p class="muted">加载中…</p></div>
       </div>
+    </div>
+  </div>
+  <!-- ================= 数据视图 ================= -->
+  <div id="view-data" hidden>
+    <div class="data-grid">
+      <div class="panel">
+        <div class="panel-head">
+          <h3>1 · 上传数据</h3>
+          <span class="hint">CSV，中英文列名都能识别</span>
+        </div>
+        <div class="panel-body" id="upload-slots"></div>
+        <div class="new-task">
+          <p class="muted" style="margin:0 0 8px">
+            没有文件？<button class="chip-btn" id="load-demo-datasets">载入内置演示数据</button>
+          </p>
+          <p class="muted" style="margin:0;font-size:11.5px">
+            支持列名：售价/价格 · 月销量/销量 · 广告组/campaign · 曝光量/impressions · 花费(BRL) · 评分/rating …
+          </p>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head">
+          <h3>2 · 补充参数</h3>
+          <span class="hint">表格里没有、但判断需要的字段</span>
+        </div>
+        <div class="panel-body">
+          <div class="form-grid">
+            <label>类目名称<input id="f-category" placeholder="Patinete Elétrico · Shopee BR"></label>
+            <label>平台
+              <select id="f-platform">
+                <option value="shopee_br">Shopee 巴西站</option>
+                <option value="mercadolivre">Mercado Livre</option>
+                <option value="amazon">Amazon</option>
+                <option value="tiktok_shop">TikTok Shop</option>
+                <option value="shopify">Shopify</option>
+              </select>
+            </label>
+            <label>商品成本<input id="f-cost" type="number" step="0.01" placeholder="168"></label>
+            <label>目标售价<input id="f-price" type="number" step="0.01" placeholder="350"></label>
+            <label>物流成本<input id="f-shipping" type="number" step="0.01" placeholder="22"></label>
+            <label>产品名<input id="f-product" placeholder="Patinete Elétrico Adulto 500W"></label>
+          </div>
+          <label class="form-full">卖点（一行一条）
+            <textarea id="f-points" rows="3" placeholder="30km 续航，一周只充两次电&#10;3 秒折叠，能塞进后备箱"></textarea>
+          </label>
+          <label class="form-full">关键词（逗号分隔，可带搜索量）
+            <textarea id="f-keywords" rows="2" placeholder="patinete elétrico, scooter elétrico adulto, patinete 500w"></textarea>
+          </label>
+          <button class="btn btn-primary" id="run-from-data" style="width:100%;justify-content:center;margin-top:6px">
+            用这些数据运行全链路
+          </button>
+          <p class="muted" style="margin:10px 0 0;font-size:11.5px">
+            缺哪份数据，对应环节会自动阻塞并说明缺什么 —— 不会编造参数。
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel" style="margin-top:16px">
+      <div class="panel-head">
+        <h3>已上传的数据集</h3>
+        <span class="hint" id="dataset-count"></span>
+      </div>
+      <div class="panel-body" id="dataset-list"><p class="muted">还没有上传任何数据</p></div>
     </div>
   </div>
 </main>

@@ -22,11 +22,30 @@
   const int = (v) => (v === null || v === undefined ? "—" : Number(v).toLocaleString("en-US"));
   const num = (v, d = 2) => (v === null || v === undefined ? "—" : Number(v).toFixed(d));
 
-  async function api(path, opts = {}) {
-    const res = await fetch(path, { headers: { "Content-Type": "application/json" }, ...opts });
+  const TOKEN_KEY = "ecom_api_token";
+  const getToken = () => localStorage.getItem(TOKEN_KEY) || "";
+  const authHeaders = () => {
+    const t = getToken();
+    return t ? { "X-API-Token": t } : {};
+  };
+
+  async function api(path, opts = {}, retried = false) {
+    const headers = { "Content-Type": "application/json", ...authHeaders(), ...(opts.headers || {}) };
+    const res = await fetch(path, { ...opts, headers });
+
+    // 服务端配了令牌时，引导用户输入一次，之后存在浏览器里
+    if (res.status === 401 && !retried) {
+      const token = prompt("这个服务需要访问令牌（服务端设置了 ECOM_API_TOKEN）：");
+      if (token) {
+        localStorage.setItem(TOKEN_KEY, token.trim());
+        return api(path, opts, true);
+      }
+    }
+
     if (!res.ok) {
       let msg = res.statusText;
       try { msg = (await res.json()).detail || msg; } catch (_) {}
+      if (res.status === 401) msg = "未授权：请刷新页面重新输入访问令牌";
       throw new Error(msg);
     }
     return res.json();
@@ -459,7 +478,170 @@
     });
     $("#view-flow").hidden = name !== "flow";
     $("#view-auto").hidden = name !== "auto";
+    $("#view-data").hidden = name !== "data";
     if (name === "auto") loadAutomation();
+    if (name === "data") {
+      initDataView();
+      loadDatasets();
+    }
+  }
+
+  /* ================= 数据接入 ================= */
+  const DATASET_KINDS = [
+    { kind: "products", name: "商品表", hint: "类目 TOP 商品（售价、月销量、品牌…）" },
+    { kind: "ads", name: "广告报表", hint: "广告组、曝光、点击、花费、订单、销售额" },
+    { kind: "reviews", name: "评论表", hint: "评分、内容、归因分类" },
+  ];
+  const datasetState = { products: null, ads: null, reviews: null };
+  let dataViewReady = false;
+
+  function initDataView() {
+    if (dataViewReady) return;
+    dataViewReady = true;
+
+    $("#upload-slots").innerHTML = DATASET_KINDS.map(
+      (d) => `<div class="upload-slot" data-kind="${d.kind}">
+        <div class="slot-head">
+          <b>${d.name}</b>
+          <span>${d.hint}</span>
+        </div>
+        <div class="slot-body">
+          <input type="file" accept=".csv,text/csv" hidden id="file-${d.kind}">
+          <button class="btn btn-sm" data-pick="${d.kind}">选择 CSV</button>
+          <span class="slot-status muted" id="status-${d.kind}">未选择</span>
+        </div>
+      </div>`
+    ).join("");
+
+    DATASET_KINDS.forEach(({ kind }) => {
+      const input = $(`#file-${kind}`);
+      document.querySelector(`[data-pick="${kind}"]`).addEventListener("click", () => input.click());
+      input.addEventListener("change", () => {
+        if (input.files?.[0]) uploadDataset(kind, input.files[0]);
+      });
+    });
+
+    $("#run-from-data").addEventListener("click", runFromDatasets);
+    $("#load-demo-datasets").addEventListener("click", () => switchView("flow"));
+  }
+
+  async function uploadDataset(kind, file) {
+    const status = $(`#status-${kind}`);
+    status.textContent = "解析中…";
+    status.classList.remove("ok", "err");
+
+    const form = new FormData();
+    form.append("kind", kind);
+    form.append("file", file);
+
+    try {
+      const res = await fetch("/api/datasets/upload", {
+        method: "POST",
+        headers: authHeaders(),
+        body: form,
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || res.statusText);
+
+      datasetState[kind] = data.id;
+      status.textContent = `✓ ${data.row_count} 行${data.skipped ? `（跳过 ${data.skipped}）` : ""}`;
+      status.classList.add("ok");
+      if (data.warnings?.length) status.title = data.warnings.join("\n");
+      loadDatasets();
+    } catch (e) {
+      status.textContent = `✗ ${e.message}`;
+      status.classList.add("err");
+      datasetState[kind] = null;
+    }
+  }
+
+  async function loadDatasets() {
+    try {
+      const data = await api("/api/datasets");
+      renderDatasets(data.datasets || []);
+    } catch (_) {
+      /* 鉴权失败等情况不阻塞视图 */
+    }
+  }
+
+  function renderDatasets(list) {
+    const box = $("#dataset-list");
+    $("#dataset-count").textContent = list.length ? `共 ${list.length} 份` : "";
+    if (!list.length) {
+      box.innerHTML = `<p class="muted">还没有上传任何数据</p>`;
+      return;
+    }
+    const kindName = { products: "商品", ads: "广告", reviews: "评论" };
+    box.innerHTML = list
+      .map(
+        (d) => `<div class="ds-row">
+          <div>
+            <b>${kindName[d.kind] || d.kind}</b>
+            <span class="mono">${esc(d.filename)}</span>
+            <span class="muted">· ${d.row_count} 行 · ${fmtTime(d.created_at)}</span>
+          </div>
+          <button class="btn btn-sm danger" data-del="${d.id}">删除</button>
+        </div>`
+      )
+      .join("");
+
+    box.querySelectorAll("button[data-del]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        await api(`/api/datasets/${btn.dataset.del}`, { method: "DELETE" });
+        for (const k of Object.keys(datasetState)) {
+          if (datasetState[k] === btn.dataset.del) datasetState[k] = null;
+        }
+        loadDatasets();
+      });
+    });
+  }
+
+  async function runFromDatasets() {
+    if (!datasetState.products && !datasetState.ads && !datasetState.reviews) {
+      alert("请先上传至少一份数据（商品 / 广告 / 评论）");
+      return;
+    }
+    const btn = $("#run-from-data");
+    btn.disabled = true;
+    btn.textContent = "运行中…";
+
+    const points = $("#f-points").value.split("\n").map((s) => s.trim()).filter(Boolean);
+    const keywords = $("#f-keywords").value
+      .split(/[,，]/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+
+    const meta = {
+      category: $("#f-category").value.trim() || undefined,
+      platform: $("#f-platform").value,
+      product_cost: parseFloat($("#f-cost").value) || undefined,
+      target_price: parseFloat($("#f-price").value) || undefined,
+      shipping_cost: parseFloat($("#f-shipping").value) || undefined,
+      product_name: $("#f-product").value.trim() || undefined,
+      selling_points: points.length ? points : undefined,
+      keywords: keywords.length ? keywords : undefined,
+    };
+
+    try {
+      const run = await api("/api/runs/from-datasets", {
+        method: "POST",
+        body: JSON.stringify({
+          product_dataset_id: datasetState.products,
+          ad_dataset_id: datasetState.ads,
+          review_dataset_id: datasetState.reviews,
+          meta,
+        }),
+      });
+      state.run = run;
+      state.active = run.stages.find((s) => s.status === "ok")?.stage || run.stages[0].stage;
+      switchView("flow");
+      renderAll();
+    } catch (e) {
+      alert(`运行失败：${e.message}`);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = "用这些数据运行全链路";
+    }
   }
 
   /* ================= 自动化 ================= */

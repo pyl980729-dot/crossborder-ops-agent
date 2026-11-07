@@ -38,7 +38,14 @@ python run.py                    # 打开 http://127.0.0.1:8000
 python scripts/demo_run.py
 ```
 
-**不需要任何 API Key。** 默认跑「离线规则模式」，全链路完整可用。要接大模型时复制 `.env.example` 为 `.env` 并配置 `ECOM_LLM_PROVIDER=openai`。
+**不需要任何 API Key。** 默认跑「离线规则模式」，全链路完整可用。要接大模型时复制 `.env.example` 为 `.env`，配置 `ECOM_LLM_PROVIDER=dashscope` + `DASHSCOPE_API_KEY`。
+
+用 Docker 起（含鉴权、日志、数据卷）：
+
+```bash
+cp .env.example .env      # 填 ECOM_API_TOKEN 即可开启鉴权
+docker compose up -d
+```
 
 ---
 
@@ -64,6 +71,47 @@ python scripts/demo_run.py
 ```
 
 06 和 07 的结论会生成 **feedback 指回上游环节**（广告 CTR 低 → 回 03/04 改创意；评论误解型多 → 回 03 补注意事项段）。界面里点击回流项，只重跑被影响的环节，不重跑全链路。
+
+---
+
+## 数据接入：把卖家的 CSV 喂进来
+
+真实痛点不是解析，是**列名对不齐**。同一个字段，Shopee 后台叫「曝光量」，Amazon 报表叫 `impressions`，ERP 导出叫「展示次数」，还带单位后缀「花费(BRL)」。
+
+上传时会自动处理三件事：
+
+| 问题 | 处理 |
+|---|---|
+| 中文 Excel 导出是 GBK | 依次尝试 UTF-8 / GBK / GB18030 |
+| 列名千奇百怪 | 中英别名模糊匹配，去空格、去括号、大小写不敏感 |
+| 数字格式混乱 | `R$ 420,50`、`1.234,56`、`1,234.56` 都能正确解析 |
+
+解析结果会明确告诉你**哪个字段匹配到了哪一列、哪些列被忽略、哪些行被跳过**：
+
+```json
+{
+  "mapping": {"广告组": "广告名称", "曝光": "曝光量", "花费": "花费(BRL)"},
+  "row_count": 3,
+  "skipped": 0,
+  "ignored_columns": []
+}
+```
+
+缺必填列时不会只说「格式错误」，而是：「缺少必填列：点击、花费。当前表头：广告名称、曝光量…」
+
+界面上传后会生成数据集，填几个表格里没有的参数（成本、售价、产品名），一键跑。
+
+---
+
+## 安全与运维
+
+| 项 | 说明 |
+|---|---|
+| **鉴权** | 设置 `ECOM_API_TOKEN` 后，所有 `/api` 需要 `X-API-Token` 或 `Bearer`；不设则开放（本机演示） |
+| **日志** | 控制台 + `data/logs/app.log`（5MB×3 滚动），每个请求带 `X-Request-ID`，401 也记 |
+| **CORS** | 默认 `*`（本机开发）；`ECOM_CORS_ORIGINS` 可收紧到具体域名 |
+| **部署** | `Dockerfile` + `docker-compose.yml`，带 healthcheck，数据卷挂 `./data` |
+| **上传限制** | 单文件 10MB、最多 5 万行 |
 
 ---
 
@@ -216,6 +264,10 @@ tests/                  # 23 个单测
 | GET | `/api/runs/{id}` | 单次运行详情（含输入，可复现） |
 | POST | `/api/stages/{stage}` | 单点重跑（闭环用） |
 | GET | `/api/contracts` | 所有 Stage 的输入契约 |
+| POST | `/api/datasets/upload` | 上传 CSV（multipart，kind=products/ads/reviews） |
+| GET | `/api/datasets` | 已上传数据集列表 |
+| DELETE | `/api/datasets/{id}` | 删除数据集 |
+| POST | `/api/runs/from-datasets` | 用数据集 + 参数直接运行 |
 | GET | `/api/automation/status` | 调度器状态 + 任务列表 + 下次执行倒计时 |
 | POST | `/api/automation/schedules` | 新建定时任务（cron + payload） |
 | PATCH | `/api/automation/schedules/{id}` | 启用 / 暂停 |
@@ -229,11 +281,12 @@ tests/                  # 23 个单测
 python -m unittest discover -s tests -v
 ```
 
-37 个用例，覆盖：盈亏线 ROAS 与净利率互逆、CR10 在品牌数不足时的降级、广告诊断顺序、可修复率口径、堆砌检测、契约阻塞、以及「同一输入两次运行结论逐字一致」。
+48 个用例，覆盖：盈亏线 ROAS 与净利率互逆、CR10 在品牌数不足时的降级、广告诊断顺序、可修复率口径、堆砌检测、契约阻塞、以及「同一输入两次运行结论逐字一致」。
 
 ## 已知限制
 
 - **不代执行**：不操作卖家后台、不自动改价改预算，动作清单交人审批
+- **单个部署即单店**：没有多租户隔离，多店铺需要拆实例或自行改造
 - **不采数据**：类目/广告/评论导出由使用者提供，系统不做爬虫
 - **不出图不出片**：产出规划与 Prompt，渲染交给生图/剪辑工具
 - **平台规则是快照**：费率、标题上限、图片规格集中在 `platforms.py`，发布前需人工复核

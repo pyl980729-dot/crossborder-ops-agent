@@ -1,0 +1,25 @@
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# 运行时数据不進镜像
+data/app.db
+data/logs/
+data/uploads/
+data/tmp/
+
+.env
+.git/
+.gitignore
+.gitattributes
+
+# 文档与素材
+shots/
+tests/
+tmp_test/
+*.md
+
+# 系统垃圾
+.DS_Store
+Thumbs.db

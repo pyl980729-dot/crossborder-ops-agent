@@ -9,3 +9,8 @@ data/app.db
 
 # 求职材料（不随公开仓库分发）
 RESUME.md
+
+# 运行时产物
+data/logs/
+data/uploads/
+tmp_test/

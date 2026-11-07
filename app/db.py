@@ -35,6 +35,16 @@ CREATE TABLE IF NOT EXISTS runs (
 
 CREATE INDEX IF NOT EXISTS idx_runs_created ON runs (created_at DESC);
 
+CREATE TABLE IF NOT EXISTS datasets (
+    id          TEXT PRIMARY KEY,
+    kind        TEXT NOT NULL,
+    filename    TEXT NOT NULL,
+    row_count   INTEGER NOT NULL,
+    mapping_json TEXT NOT NULL,
+    path        TEXT NOT NULL,
+    created_at  TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS schedules (
     id          TEXT PRIMARY KEY,
     name        TEXT NOT NULL,
@@ -159,6 +169,75 @@ def stats() -> dict:
             "SELECT COUNT(*) AS c FROM runs WHERE trigger = 'scheduler'"
         ).fetchone()["c"]
     return {"total_runs": total, "ok_runs": ok, "scheduled_runs": scheduled}
+
+
+# ---------------------------------------------------------------------------
+# 数据集
+# ---------------------------------------------------------------------------
+
+UPLOAD_DIR = DATA_DIR / "uploads"
+
+
+def save_dataset(did: str, kind: str, filename: str, rows: list[dict], mapping: dict) -> dict:
+    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    path = UPLOAD_DIR / f"{did}.json"
+    path.write_text(json.dumps(rows, ensure_ascii=False), encoding="utf-8")
+
+    created = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    with _open() as conn:
+        conn.execute(
+            "INSERT INTO datasets (id, kind, filename, row_count, mapping_json, path, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (did, kind, filename, len(rows), json.dumps(mapping, ensure_ascii=False), str(path), created),
+        )
+    return {"id": did, "kind": kind, "filename": filename, "row_count": len(rows),
+            "mapping": mapping, "created_at": created}
+
+
+def list_datasets(kind: str | None = None) -> list[dict]:
+    sql = "SELECT id, kind, filename, row_count, mapping_json, created_at FROM datasets"
+    params: tuple = ()
+    if kind:
+        sql += " WHERE kind = ?"
+        params = (kind,)
+    sql += " ORDER BY rowid DESC"
+    with _open() as conn:
+        rows = conn.execute(sql, params).fetchall()
+    return [
+        {
+            "id": r["id"],
+            "kind": r["kind"],
+            "filename": r["filename"],
+            "row_count": r["row_count"],
+            "mapping": json.loads(r["mapping_json"]),
+            "created_at": r["created_at"],
+        }
+        for r in rows
+    ]
+
+
+def load_dataset_rows(did: str) -> list[dict] | None:
+    with _open() as conn:
+        row = conn.execute("SELECT path FROM datasets WHERE id = ?", (did,)).fetchone()
+    if not row:
+        return None
+    path = Path(row["path"])
+    if not path.exists():
+        return None
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def delete_dataset(did: str) -> bool:
+    with _open() as conn:
+        row = conn.execute("SELECT path FROM datasets WHERE id = ?", (did,)).fetchone()
+        if not row:
+            return False
+        conn.execute("DELETE FROM datasets WHERE id = ?", (did,))
+    try:
+        Path(row["path"]).unlink(missing_ok=True)
+    except OSError:
+        pass
+    return True
 
 
 # ---------------------------------------------------------------------------

@@ -1,0 +1,21 @@
+services:
+  app:
+    build: .
+    image: crossborder-ops-agent:0.2
+    container_name: crossborder-ops
+    ports:
+      - "8000:8000"
+    environment:
+      # 留空 = 开放模式（本机演示用）。对外暴露时务必设置。
+      ECOM_API_TOKEN: ${ECOM_API_TOKEN:-}
+      ECOM_LLM_PROVIDER: ${ECOM_LLM_PROVIDER:-rule}
+      ECOM_LLM_MODEL: ${ECOM_LLM_MODEL:-qwen-plus}
+      DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY:-}
+      ECOM_LOG_LEVEL: ${ECOM_LOG_LEVEL:-INFO}
+    volumes:
+      # 数据库、日志、上传的数据集都持久化在宿主机
+      - ./data:/app/data
+    restart: unless-stopped
+    # 单 worker：内置调度器不支持多实例，多副本部署会重复触发
+    deploy:
+      replicas: 1

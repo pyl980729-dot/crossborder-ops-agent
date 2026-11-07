@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 
 from app import db
+from app.core import datasets as ds
 from app.core.contracts import STAGE_ORDER, contract_catalog
+from app.core.logging import get_logger
 from app.core.cron import validate as validate_cron
 from app.core.llm import provider_info
 from app.core.platforms import platform_list
@@ -15,6 +17,7 @@ from app.orchestrator import REGISTRY, run_single, run_stages
 from app.scheduler import get_scheduler
 
 router = APIRouter(prefix="/api")
+log = get_logger("api")
 
 
 class RunRequest(BaseModel):
@@ -167,3 +170,96 @@ def automation_tick() -> dict:
     """手动触发一次调度检查，不用等到下一个 tick 周期。"""
     executed = get_scheduler().tick()
     return {"executed": executed, "status": get_scheduler().status()}
+
+
+# ---------------------------------------------------------------------------
+# 数据接入：CSV 上传
+# ---------------------------------------------------------------------------
+
+MAX_UPLOAD_BYTES = 10 * 1024 * 1024
+
+
+@router.post("/datasets/upload")
+async def upload_dataset(
+    kind: str = Form(..., description="products | ads | reviews"),
+    file: UploadFile = File(...),
+) -> dict:
+    """上传并解析 CSV，返回列名映射结果。
+
+    解析失败会明确指出「缺哪一列、当前有哪些列」，而不是一句「格式错误」。
+    """
+    raw = await file.read()
+    if len(raw) > MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="文件超过 10MB")
+
+    try:
+        parsed = ds.parse_csv(raw, kind)
+    except ds.DatasetError as exc:
+        log.warning("dataset upload rejected kind=%s file=%s err=%s", kind, file.filename, exc)
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    did = db.new_run_id()
+    saved = db.save_dataset(
+        did, kind, file.filename or f"{kind}.csv", parsed["rows"], parsed["mapping"]
+    )
+    log.info(
+        "dataset uploaded id=%s kind=%s rows=%s skipped=%s",
+        did, kind, parsed["row_count"], parsed["skipped"],
+    )
+    return {
+        **saved,
+        "skipped": parsed["skipped"],
+        "ignored_columns": parsed["ignored_columns"],
+        "warnings": parsed["warnings"],
+        "preview": parsed["preview"],
+    }
+
+
+@router.get("/datasets")
+def get_datasets(kind: str | None = None) -> dict:
+    return {"datasets": db.list_datasets(kind)}
+
+
+@router.delete("/datasets/{did}")
+def remove_dataset(did: str) -> dict:
+    if not db.delete_dataset(did):
+        raise HTTPException(status_code=404, detail="数据集不存在")
+    log.info("dataset deleted id=%s", did)
+    return {"id": did, "deleted": True}
+
+
+class RunFromDatasets(BaseModel):
+    product_dataset_id: str | None = None
+    ad_dataset_id: str | None = None
+    review_dataset_id: str | None = None
+    meta: dict = Field(default_factory=dict)
+
+
+@router.post("/runs/from-datasets")
+def run_from_datasets(req: RunFromDatasets) -> dict:
+    """用已上传的数据集组装并执行。
+
+    缺哪份数据就不塞哪份 —— 下游 Stage 会自己报 INPUT_MISSING，
+    这里绝不补假数据。
+    """
+    def rows_of(did: str | None, label: str) -> list[dict] | None:
+        if not did:
+            return None
+        rows = db.load_dataset_rows(did)
+        if rows is None:
+            raise HTTPException(status_code=404, detail=f"{label}数据集不存在或已删除")
+        return rows
+
+    products = rows_of(req.product_dataset_id, "商品")
+    ads = rows_of(req.ad_dataset_id, "广告")
+    reviews = rows_of(req.review_dataset_id, "评论")
+
+    if not any([products, ads, reviews]):
+        raise HTTPException(status_code=400, detail="至少要选择一份数据集")
+
+    payload = ds.build_payload(products=products, ads=ads, reviews=reviews, meta=req.meta)
+    log.info(
+        "run from datasets products=%s ads=%s reviews=%s",
+        len(products or []), len(ads or []), len(reviews or []),
+    )
+    return run_stages(payload)
