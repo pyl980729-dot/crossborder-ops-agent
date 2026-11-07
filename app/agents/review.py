@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from app.agents.base import StageAgent, action, feedback, fmt_pct, insight
 from app.core import config, metrics as M
+from app.core.review_classify import classify_batch
 from app.core.contracts import StageResult
 
 # 八类归因 → 修补动作（这是运营 SOP 里最值钱的一张表）
@@ -29,7 +30,10 @@ class ReviewAgent(StageAgent):
 
     def _run(self, payload: dict) -> StageResult:
         cfg = config.load_config(payload.get("platform"), payload.get("thresholds"))
-        agg = M.review_aggregate(payload["reviews"])
+
+        # 先自动归因，再做统计 —— 真实导出的评论表只有评分和正文，没有分类列
+        reviews, cls = classify_batch(payload["reviews"], use_llm=True)
+        agg = M.review_aggregate(reviews)
 
         insights = []
         actions = []
@@ -44,6 +48,49 @@ class ReviewAgent(StageAgent):
                 "review_aggregate.good_rate",
             )
         )
+
+        # ---- 自动归因情况 ----
+        auto, manual, pending = cls["auto"], cls["manual"], cls["pending"]
+        if auto or manual:
+            parts = []
+            if cls["rule_high"] or cls["rule_medium"] or cls["rule_low"]:
+                parts.append(f"关键词规则 {cls['rule_high'] + cls['rule_medium'] + cls['rule_low']} 条")
+            if cls["llm"]:
+                parts.append(f"模型兜底 {cls['llm']} 条")
+            if manual:
+                parts.append(f"保留人工标注 {manual} 条")
+            insights.append(
+                insight(
+                    f"归因覆盖率 {fmt_pct(cls['coverage'])}：{'、'.join(parts)}。"
+                    f"同一批评论重跑结果完全一致（规则确定性），"
+                    f"只有进了模型的那部分会因温度参数略有波动。",
+                    "good" if cls["coverage"] >= 0.9 else "warn",
+                    "review_classify.coverage",
+                )
+            )
+
+        if pending:
+            insights.append(
+                insight(
+                    f"还有 {pending} 条差评机器分不出来，已标记「待人工确认」，"
+                    f"不计入归因占比也不生成动作 —— 猜错分类比不分类更糟，"
+                    f"它会让你去改一个不存在的问题。",
+                    "warn",
+                    "review_classify.pending",
+                )
+            )
+
+        low_conf = cls["rule_low"]
+        if low_conf:
+            insights.append(
+                insight(
+                    f"{low_conf} 条命中单一关键词、置信度偏低，建议抽查确认。"
+                    f"典型误判：用户写「以为续航长」，字面命中「续航」会被归到参数不符，"
+                    f"实际是误解型 —— 这两种的补救动作完全不同。",
+                    "info",
+                    "review_classify.rule_low",
+                )
+            )
 
         if agg["bad_count"]:
             insights.append(
@@ -131,7 +178,7 @@ class ReviewAgent(StageAgent):
             title=self.title,
             status="ok",
             headline=headline,
-            metrics={"aggregate": agg, "playbook": FIX_PLAYBOOK},
+            metrics={"aggregate": agg, "playbook": FIX_PLAYBOOK, "classify": cls},
             insights=insights,
             actions=actions,
             feedback=feedbacks,

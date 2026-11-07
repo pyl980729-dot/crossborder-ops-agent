@@ -732,3 +732,7 @@ main { min-height: calc(100vh - 150px); }
   padding: 8px 12px; border-radius: 8px; border: 1px solid var(--line-strong);
   background: var(--surface); font-size: 12.5px; font-family: inherit; color: var(--text);
 }
+
+
+.classify-bar { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+.classify-bar .chip.info { background: var(--info-soft); border-color: #bfdbfe; color: var(--info); }

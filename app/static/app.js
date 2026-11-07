@@ -383,12 +383,33 @@
 
   function renderReview(m) {
     const a = m.aggregate || {};
+    const c = m.classify || {};
+    const coverage = c.coverage ?? 0;
+    const pending = c.pending ?? 0;
+
     const cards = `<div class="metric-grid">${[
       metricCard("评论总数", int(a.total), `平均分 ${a.avg_rating}`),
       metricCard("好评率", pct(a.good_rate), `差评 ${a.bad_count} 条`),
-      metricCard("可修复率", pct(a.fixable_rate), `${a.fixable_count} 条改内容可消`),
-      metricCard("带图率", pct(a.with_image_rate), "影响转化"),
-    ].join("")}</div>`;
+      metricCard("归因覆盖率", pct(coverage), `自动分掉 ${c.auto ?? 0}/${c.total ?? 0} 条`),
+      metricCard(
+        "待人工确认",
+        pending,
+        pending ? "机器分不出，不生成动作" : "全部分完"
+      ),
+    ].join("")}</div>
+    <div class="classify-bar">
+      ${[
+        ["关键词·高置信", c.rule_high ?? 0, "good"],
+        ["关键词·中", c.rule_medium ?? 0, ""],
+        ["关键词·低（建议抽查）", c.rule_low ?? 0, "warn"],
+        ["模型兜底", c.llm ?? 0, "info"],
+        ["保留人工标注", c.manual ?? 0, ""],
+        ["待确认", pending, pending ? "miss" : ""],
+      ]
+        .filter(([, n]) => n > 0)
+        .map(([label, n, cls]) => `<span class="chip ${cls}">${label} ${n}</span>`)
+        .join("")}
+    </div>`;
 
     const rows = (a.bad_by_category || [])
       .map(

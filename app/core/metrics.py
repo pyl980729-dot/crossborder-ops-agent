@@ -571,7 +571,13 @@ def review_aggregate(reviews: Sequence[dict]) -> dict:
     bad = sum(1 for r in ratings if r < 3)
 
     bad_rows = [r for r in reviews if num(r.get("rating"), "rating") < 3]
-    cat_counter = Counter(str(r.get("category") or "未标注") for r in bad_rows)
+
+    # 待人工确认的差评不能算进「已归因」，否则归因占比会虚高
+    UNLABELED = {"未标注", "待人工确认", ""}
+    labeled_bad = [r for r in bad_rows if str(r.get("category") or "").strip() not in UNLABELED]
+    cat_counter = Counter(
+        str(r.get("category")).strip() for r in labeled_bad
+    )
 
     by_category = []
     for cat, count in cat_counter.most_common():
@@ -600,7 +606,8 @@ def review_aggregate(reviews: Sequence[dict]) -> dict:
         "fixable_count": fixable_count,
         "fixable_rate": ratio(fixable_count, len(bad_rows)) if bad_rows else 0.0,
         "with_image_rate": ratio(with_image, total),
-        "unlabeled_bad": cat_counter.get("未标注", 0),
+        "labeled_bad": len(labeled_bad),
+        "unlabeled_bad": len(bad_rows) - len(labeled_bad),
     }
 
 
