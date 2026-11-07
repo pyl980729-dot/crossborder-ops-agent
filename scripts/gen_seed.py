@@ -114,7 +114,13 @@ GOOD_TEMPLATES = [
 ]
 
 
-def gen_reviews(total: int = 150) -> list[dict]:
+def gen_reviews(total: int = 450) -> list[dict]:
+    """评论种子。
+
+    数量给到 450 而不是 150：评论比广告稀疏得多，按月做趋势对比时，
+    150 条（差评 21 条）摊到两个月里，每边只有 10 条 —— 刚够看，稍少一点就全是噪声。
+    450 条能让「按月对比」这个口径站得住。
+    """
     rows = []
     bad_target = int(total * 0.145)
     for i in range(bad_target):
@@ -122,6 +128,11 @@ def gen_reviews(total: int = 150) -> list[dict]:
         # 误解型刻意做多，用来演示"可修复率高"
         if i % 3 == 0:
             cat, rating, text, img = REVIEW_TEMPLATES[0]
+        # 配件缺失保持 ~8%：太低演示不出"某类问题突然变多"的场景
+        if i % 12 == 5:
+            cat, rating, text, img = random.choice(
+                [t for t in REVIEW_TEMPLATES if t[0] == "配件缺失"]
+            )
         rows.append({"sku": "SC-1000", "rating": rating, "text": text, "category": cat, "has_image": img})
     while len(rows) < total:
         cat, rating, text, img = random.choice(GOOD_TEMPLATES)

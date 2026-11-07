@@ -13,10 +13,18 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SEED_DIR = BASE_DIR / "data" / "seed"
 
 
-def _read_csv(name: str) -> list[dict]:
+def _read_csv(name: str, fallback: str | None = None) -> list[dict]:
+    """读种子 CSV。name 不存在时退到 fallback。
+
+    存在「日报」时优先用日报 —— 真实导出的广告/评论表几乎都带日期，
+    日期是趋势对比的前提，演示数据也应该反映这一点。
+    """
     path = SEED_DIR / name
     if not path.exists():
-        raise FileNotFoundError(f"种子数据缺失: {path}，请先运行 python scripts/gen_seed.py")
+        if fallback and (SEED_DIR / fallback).exists():
+            path = SEED_DIR / fallback
+        else:
+            raise FileNotFoundError(f"种子数据缺失: {path}，请先运行 python scripts/gen_seed.py")
     with path.open(encoding="utf-8") as fh:
         return list(csv.DictReader(fh))
 
@@ -28,7 +36,7 @@ def build_demo_payload() -> dict:
         row["monthly_sales"] = int(row["monthly_sales"])
         row["rating"] = float(row["rating"])
 
-    campaigns = _read_csv("ads.csv")
+    campaigns = _read_csv("ads_daily.csv", fallback="ads.csv")
     for row in campaigns:
         row["impressions"] = int(row["impressions"])
         row["clicks"] = int(row["clicks"])
@@ -36,7 +44,7 @@ def build_demo_payload() -> dict:
         row["orders"] = int(row["orders"])
         row["revenue"] = float(row["revenue"])
 
-    reviews = _read_csv("reviews.csv")
+    reviews = _read_csv("reviews_daily.csv", fallback="reviews.csv")
     for row in reviews:
         row["rating"] = float(row["rating"])
         row["has_image"] = int(row["has_image"])

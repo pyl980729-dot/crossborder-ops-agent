@@ -48,6 +48,24 @@ class ThresholdDef:
 
 # 顺序即前端展示顺序
 THRESHOLDS: dict[str, ThresholdDef] = {
+    # --- 时间轴 ---
+    "timeline.ads_window_days": ThresholdDef(
+        "timeline.ads_window_days", "广告对比窗口（天）", "时间轴", 7, "count", 3, 30,
+        "广告一天几百次点击，7 天足够稳定。数据量小的店改 14，避免单日波动被当成趋势",
+    ),
+    "timeline.review_window_days": ThresholdDef(
+        "timeline.review_window_days", "评论对比窗口（天）", "时间轴", 28, "count", 7, 90,
+        "评论一周才几条，用 7 天窗口做比率对比，噪声会盖过信号 —— 所以评论按月看",
+    ),
+    "timeline.mover_threshold": ThresholdDef(
+        "timeline.mover_threshold", "涨跌判定线", "时间轴", 0.15, "ratio", 0.05, 1.0,
+        "广告组 ROAS 变化超过此比例才算「恶化/改善」。设成 0 会把每天的噪声都当成趋势",
+    ),
+    "timeline.min_coverage": ThresholdDef(
+        "timeline.min_coverage", "最低覆盖率", "时间轴", 0.6, "ratio", 0.2, 1.0,
+        "窗口内「有数据的天数」低于此比例就不做对比 —— 否则涨跌反映的是投放了几天，不是效果好坏",
+    ),
+
     # --- 广告诊断 ---
     "ads.ctr_bench": ThresholdDef(
         "ads.ctr_bench", "CTR 基准", "广告诊断", 0.02, "ratio", 0.001, 0.30,

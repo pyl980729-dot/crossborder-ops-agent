@@ -484,6 +484,77 @@ def grade_campaign(
     }
 
 
+def collapse_by_campaign(rows: Sequence[dict]) -> list[dict]:
+    """把同一广告组的多行合并成一行。
+
+    为什么必须做：日粒度明细里一个组有 N 行（N = 天数）。
+    直接逐行分级，6 个组会被看成 42 个组，P0 数量直接放大 7 倍，
+    而「组数」是给人看的核心指标，错了整份报告就废了。
+
+    合并的是可加字段（曝光/点击/花费/订单/销售额），
+    比率字段（CTR/ROAS）必须由合并后的值重算 —— 不能对比率取平均。
+    """
+    buckets: dict[str, dict] = {}
+    for row in rows:
+        name = str(row.get("campaign") or "未命名").strip()
+        acc = buckets.get(name)
+        if acc is None:
+            acc = {"campaign": name, "impressions": 0, "clicks": 0,
+                   "cost": 0.0, "orders": 0, "revenue": 0.0}
+            if row.get("price") is not None:
+                acc["price"] = row["price"]
+            buckets[name] = acc
+        acc["impressions"] += int(num(row.get("impressions"), "impressions"))
+        acc["clicks"] += int(num(row.get("clicks"), "clicks"))
+        acc["cost"] += num(row.get("cost"), "cost")
+        acc["orders"] += int(num(row.get("orders"), "orders"))
+        acc["revenue"] += num(row.get("revenue"), "revenue")
+
+    for acc in buckets.values():
+        acc["cost"] = _money(acc["cost"])
+        acc["revenue"] = _money(acc["revenue"])
+    return list(buckets.values())
+
+
+def ads_totals(rows: Sequence[dict]) -> dict:
+    """只做汇总，不做分级 —— 用于周期对比（本期 vs 上期）。
+
+    单独抽出来的原因：周期对比只需要整体 ROAS/CTR 这些数，
+    不需要给每个组重新分级；而两处各写一遍求和逻辑，
+    迟早会出现「同一次运行里两个 ROAS」。
+    """
+    if not rows:
+        return {
+            "campaign_count": 0, "total_cost": 0.0, "total_revenue": 0.0,
+            "total_orders": 0, "total_clicks": 0, "total_impressions": 0,
+            "overall_roas": 0.0, "overall_ctr": 0.0, "overall_cvr": 0.0,
+            "overall_cpa": 0.0, "net_after_ads": 0.0,
+            "by_level": {}, "p0_count": 0,
+        }
+
+    total_cost = sum(num(r.get("cost"), "cost") for r in rows)
+    total_revenue = sum(num(r.get("revenue"), "revenue") for r in rows)
+    total_orders = int(sum(num(r.get("orders"), "orders") for r in rows))
+    total_clicks = int(sum(num(r.get("clicks"), "clicks") for r in rows))
+    total_impr = int(sum(num(r.get("impressions"), "impressions") for r in rows))
+
+    return {
+        "campaign_count": len(rows),
+        "total_cost": _money(total_cost),
+        "total_revenue": _money(total_revenue),
+        "total_orders": total_orders,
+        "total_clicks": total_clicks,
+        "total_impressions": total_impr,
+        "overall_roas": round(ratio(total_revenue, total_cost), 2),
+        "overall_ctr": ratio(total_clicks, total_impr),
+        "overall_cvr": ratio(total_orders, total_clicks),
+        "overall_cpa": _money(ratio(total_cost, total_orders)),
+        "net_after_ads": _money(total_revenue - total_cost),
+        "by_level": {},
+        "p0_count": 0,
+    }
+
+
 def diagnose_ads(
     rows: Sequence[dict],
     breakeven_roas: float,
@@ -493,10 +564,14 @@ def diagnose_ads(
     min_clicks: int = 30,
     bleeding_ratio: float = 0.5,
 ) -> dict:
-    """整张广告报表的诊断：逐组分级 + 汇总。"""
+    """整张广告报表的诊断：逐组分级 + 汇总。
+
+    先按广告组合并再分级 —— 明细是日粒度时，一组会占多行。
+    """
     if not rows:
         raise MetricError("广告报表为空", "rows")
 
+    rows = collapse_by_campaign(rows)
     campaigns = []
     for row in rows:
         m = funnel_row(row, num(row.get("price", 0), "price"))

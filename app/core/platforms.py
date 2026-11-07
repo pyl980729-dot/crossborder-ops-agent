@@ -30,6 +30,9 @@ class PlatformSpec:
     image_max_count: int
     # 输出语言
     language: str
+    # 日期列默认顺序：报表里 01/11 这类写法在数据内找不到证据时的兜底。
+    # 巴西/欧洲是 日/月，美国是 月/日 —— 猜错会把趋势图整体错位。
+    date_order: str = "dmy"
     notes: list[str] = field(default_factory=list)
 
 
@@ -78,6 +81,7 @@ PLATFORMS: dict[str, PlatformSpec] = {
         image_bg="pure_white",
         image_max_count=9,
         language="en",
+        date_order="mdy",  # Amazon 后台报表默认 月/日/年
         notes=[
             "标题建议 80 字符内（移动端可读），上限 200 仅为硬限",
             "主图必须纯白底 RGB(255,255,255)，主体占比 ≥85%",

@@ -34,6 +34,7 @@ COLUMN_ALIASES: dict[str, dict[str, list[str]]] = {
         "seller": ["seller", "卖家", "店铺"],
     },
     "ads": {
+        "date": ["date", "日期", "统计日期", "日期(day)", "day", "data", "report_date", "投放日期"],
         "campaign": ["campaign", "广告组", "广告名称", "campaign_name", "广告活动", "计划名称"],
         "impressions": ["impressions", "曝光", "曝光量", "展示", "展示次数", "曝光数"],
         "clicks": ["clicks", "点击", "点击量", "点击数"],
@@ -42,6 +43,8 @@ COLUMN_ALIASES: dict[str, dict[str, list[str]]] = {
         "revenue": ["revenue", "销售额", "gmv", "收入", "转化金额", "成交金额"],
     },
     "reviews": {
+        "date": ["date", "日期", "评论日期", "评价日期", "评论时间", "评价时间",
+                 "review_date", "created_at", "data"],
         "sku": ["sku", "商品id", "编码"],
         "rating": ["rating", "评分", "星级", "star", "分数"],
         "text": ["text", "评论", "内容", "review", "评价内容", "评论内容"],
@@ -74,7 +77,7 @@ FIELD_LABELS = {
     "config": "配置", "is_new_seller": "新卖家", "seller": "卖家",
     "campaign": "广告组", "impressions": "曝光", "clicks": "点击",
     "cost": "花费", "orders": "订单", "revenue": "销售额",
-    "text": "评论内容", "category": "归因", "has_image": "带图",
+    "text": "评论内容", "category": "归因", "has_image": "带图", "date": "日期",
 }
 
 
@@ -171,8 +174,89 @@ def _to_number(value: Any) -> float | None:
         return None
 
 
-def parse_csv(raw: bytes, kind: str) -> dict:
-    """解析并规范化一份 CSV。返回可直接入库与展示的结果。"""
+def _normalize_dates(
+    rows: list[dict],
+    mapping: dict[str, str],
+    warnings: list[str],
+    order_hint: str | None,
+) -> dict | None:
+    """把日期列统一成 ISO 字符串，并记录「用了什么假设」。
+
+    三件事必须摊开说清楚，否则用户拿到错趋势还以为是真的：
+    1. 日/月顺序是靠什么确定的（数据证据 / 平台习惯）
+    2. 有多少行日期认不出来（已排除，不是按当天补）
+    3. 跨度是否离谱（可能是日序判断错了）
+    """
+    if "date" not in mapping:
+        return None
+
+    from app.core.timeline import detect_order, parse_date
+
+    raw_values = [r.get("date") for r in rows]
+    order, source = detect_order(raw_values)
+
+    if source == "conflict":
+        warnings.append(
+            "日期列里同时出现了「日/月」和「月/日」两种写法（既有 25/10 也有 10/25），"
+            "已按「日/月」解析，请核对源文件的日期格式"
+        )
+    assumed = False
+    if order == "unknown":
+        order = order_hint or "dmy"
+        assumed = True
+        if source == "no_evidence":
+            warnings.append(
+                f"日期全是「两段都不超过 12」的写法（如 01/11），无法从数据判断日/月顺序，"
+                f"已按「{'日/月' if order == 'dmy' else '月/日'}」解析 —— 如果趋势图看起来错位，请检查这里"
+            )
+
+    unparsed = 0
+    parsed_dates = []
+    for r in rows:
+        d = parse_date(r.get("date"), order=order)
+        if d is None:
+            unparsed += 1
+            r.pop("date", None)
+        else:
+            r["date"] = d.isoformat()
+            parsed_dates.append(d)
+
+    if not parsed_dates:
+        for r in rows:
+            r.pop("date", None)
+        warnings.append(
+            f"「{mapping['date']}」这一列认不出日期，已忽略该列（示例：{str(raw_values[0])[:24]}）"
+        )
+        return None
+
+    if unparsed:
+        warnings.append(f"{unparsed} 行日期无法识别，这些行不参与趋势对比（不按当天补齐）")
+
+    info = {
+        "column": mapping["date"],
+        "order": order,
+        "order_source": source,
+        "assumed": assumed,
+        "unparsed": unparsed,
+        "first": min(parsed_dates).isoformat(),
+        "last": max(parsed_dates).isoformat(),
+        "days": (max(parsed_dates) - min(parsed_dates)).days + 1,
+    }
+
+    if info["days"] > 730:
+        warnings.append(
+            f"日期跨度 {info['days']} 天，超过两年 —— 常见的日序解析错误会把 30 天数据摊成一年，建议核对"
+        )
+    return info
+
+
+def parse_csv(raw: bytes, kind: str, order: str | None = None) -> dict:
+    """解析并规范化一份 CSV。返回可直接入库与展示的结果。
+
+    order 是「日/月」顺序的兜底假设，只在数据本身没有证据时生效
+    （例如整列都是 01/11、02/11 这种两段都不超过 12 的写法）。
+    调用方应按店铺所在平台传入：巴西/欧洲站 dmy，美国站 mdy。
+    """
     if kind not in COLUMN_ALIASES:
         raise DatasetError(f"未知数据类型: {kind}")
 
@@ -233,6 +317,8 @@ def parse_csv(raw: bytes, kind: str) -> dict:
     if not rows:
         raise DatasetError("没有解析出任何有效数据行，请检查数值列是否为空")
 
+    date_info = _normalize_dates(rows, mapping, warnings, order)
+
     return {
         "ok": True,
         "kind": kind,
@@ -242,6 +328,7 @@ def parse_csv(raw: bytes, kind: str) -> dict:
         "mapping": {FIELD_LABELS.get(k, k): v for k, v in mapping.items()},
         "ignored_columns": ignored,
         "warnings": warnings,
+        "date_info": date_info,
         "preview": rows[:5],
     }
 

@@ -8,9 +8,10 @@
 from __future__ import annotations
 
 from app.agents.base import StageAgent, action, feedback, fmt_pct, insight
-from app.core import config, metrics as M
+from app.core import config, metrics as M, timeline
 from app.core.review_classify import classify_batch
 from app.core.contracts import StageResult
+from app.core.platforms import get_platform
 
 # 八类归因 → 修补动作（这是运营 SOP 里最值钱的一张表）
 FIX_PLAYBOOK = {
@@ -38,7 +39,11 @@ class ReviewAgent(StageAgent):
         insights = []
         actions = []
         feedbacks = []
-        evidence = ["metrics.review_aggregate", "bad_by_category[*]"]
+        evidence = [
+            "metrics.review_aggregate",
+            "bad_by_category[*]",
+            "timeline.analyze",
+        ]
 
         insights.append(
             insight(
@@ -113,6 +118,76 @@ class ReviewAgent(StageAgent):
                 )
             )
 
+        # ---- 趋势：近 N 天 vs 前 N 天 ----
+        platform = get_platform(payload.get("platform"))
+        # 评论的窗口单独配：一周只有几条评论，7 天窗口做比率对比全是噪声
+        window = cfg.get_int("timeline.review_window_days")
+        tl = timeline.analyze(
+            reviews,
+            window=window,
+            order=platform.date_order,
+            # 评论不像广告，不是「每天都该有数据」；缺一天不代表漏导。
+            # 所以这里不看覆盖率，看两个窗口里的评论条数够不够。
+            min_coverage=0.0,
+            series_fn=_day_point,
+        )
+        if tl["available"]:
+            # 一天只有几条评论，按天算的差评率会在 0% 和 33% 之间跳，全是锯齿
+            tl["series"] = _smooth_series(tl["series"], span=7)
+        trend = _build_trend(tl) if tl["available"] else None
+
+        if trend:
+            cur_agg, prev_agg = trend["current"], trend["previous"]
+            if trend["enough_sample"]:
+                bad_row = next(r for r in trend["rows"] if r["key"] == "bad_rate")
+                pts = (bad_row["curr"] - bad_row["prev"]) * 100
+                move = "上升" if pts > 0.5 else "下降" if pts < -0.5 else "基本持平"
+                insights.append(
+                    insight(
+                        f"近 {window} 天差评率 {fmt_pct(bad_row['curr'])}（{cur_agg['bad']} 条），"
+                        f"前 {window} 天 {fmt_pct(bad_row['prev'])}（{prev_agg['bad']} 条）→ {move} {abs(pts):.1f} 个百分点。"
+                        f"样本量够，这个方向可信。",
+                        "risk" if pts > 0.5 else "good" if pts < -0.5 else "info",
+                        "timeline.change.bad_rate",
+                    )
+                )
+            else:
+                insights.append(
+                    insight(
+                        f"近 {window} 天只有 {cur_agg['bad']} 条差评（前 {window} 天 {prev_agg['bad']} 条），"
+                        f"低于 {trend['min_sample']} 条的判断线：比率上的一点波动就是噪声，"
+                        f"所以不做「在变好/变坏」的结论 —— 要么拉长窗口，要么再攒几天。",
+                        "info",
+                        "timeline.sample",
+                    )
+                )
+
+            risers = trend["risers"]
+            if risers and trend["enough_sample"]:
+                top = risers[0]
+                insights.append(
+                    insight(
+                        f"「{top['category']}」最近才冒出来：近 {window} 天 {top['curr']} 条，"
+                        f"前 {window} 天 {top['prev']} 条。"
+                        f"这类「突然出现」的问题通常来自某个环节的变化（换包装、换供应商、改了详情页），"
+                        f"比长期存在的问题更值得马上查。",
+                        "risk",
+                        "timeline.risers[0]",
+                    )
+                )
+
+            if tl.get("assumption"):
+                insights.append(insight(tl["assumption"], "info", "timeline.assumption"))
+        else:
+            insights.append(
+                insight(
+                    f"没有做趋势对比：{tl['reason']}。"
+                    f"当前结论基于全部评论的平均水平 —— 好评率在爬升还是在下滑，看不出来。",
+                    "info",
+                    "timeline.unavailable",
+                )
+            )
+
         if agg["with_image_rate"] < 0.15:
             insights.append(
                 insight(
@@ -172,16 +247,167 @@ class ReviewAgent(StageAgent):
             f"{agg['total']} 条评论 / 好评率 {fmt_pct(agg['good_rate'])}，"
             f"差评 {agg['bad_count']} 条其中 {fmt_pct(agg['fixable_rate'])} 可内容修复"
         )
+        if trend and trend["enough_sample"]:
+            bad_row = next(r for r in trend["rows"] if r["key"] == "bad_rate")
+            headline += (
+                f"；近 {window} 天差评率 {fmt_pct(bad_row['curr'])}"
+                f"（前 {window} 天 {fmt_pct(bad_row['prev'])}）"
+            )
 
         return StageResult(
             stage=self.key,
             title=self.title,
             status="ok",
             headline=headline,
-            metrics={"aggregate": agg, "playbook": FIX_PLAYBOOK, "classify": cls},
+            metrics={
+                "aggregate": agg,
+                "playbook": FIX_PLAYBOOK,
+                "classify": cls,
+                "timeline": _public_timeline(tl, trend),
+            },
             insights=insights,
             actions=actions,
             feedback=feedbacks,
             evidence=evidence,
             next_stage=None,
         )
+
+
+def _build_trend(tl: dict) -> dict:
+    """评论趋势。样本门槛比广告严 —— 评论一天才几条，比率极不稳定。"""
+    MIN_SAMPLE = 10
+
+    cur_rows = tl["current"]["rows"]
+    prev_rows = tl["previous"]["rows"]
+    cur = M.review_aggregate(cur_rows) if cur_rows else None
+    prev = M.review_aggregate(prev_rows) if prev_rows else None
+
+    if not cur or not prev:
+        return {
+            "available": False,
+            "enough_sample": False,
+            "min_sample": MIN_SAMPLE,
+            "current": {"bad": cur["bad"] if cur else 0, "total": cur["total"] if cur else 0},
+            "previous": {"bad": prev["bad"] if prev else 0, "total": prev["total"] if prev else 0},
+            "rows": [],
+            "risers": [],
+            "series": tl.get("series", []),
+        }
+
+    specs = [
+        ("bad_rate", "差评率", "down"),
+        ("good_rate", "好评率", "up"),
+        ("avg_rating", "平均分", "up"),
+    ]
+    rows = []
+    for key, label, direction in specs:
+        before = float(prev[key] or 0)
+        after = float(cur[key] or 0)
+        delta = after - before
+        if abs(delta) < 1e-9:
+            move = "same"
+        elif (delta > 0) == (direction == "up"):
+            move = "better"
+        else:
+            move = "worse"
+        rows.append(
+            {
+                "key": key,
+                "label": label,
+                "prev": round(before, 4),
+                "curr": round(after, 4),
+                "delta": round(delta, 4),
+                "delta_pct": round(delta / before, 4) if before else 0.0,
+                "trend": move,
+            }
+        )
+
+    # 类别迁移：只看「变多」的，变少的说明已经在修
+    cur_cat = {i["category"]: i["count"] for i in cur["bad_by_category"]}
+    prev_cat = {i["category"]: i["count"] for i in prev["bad_by_category"]}
+    risers = [
+        {
+            "category": cat,
+            "prev": prev_cat.get(cat, 0),
+            "curr": count,
+            "delta": count - prev_cat.get(cat, 0),
+        }
+        for cat, count in cur_cat.items()
+        if count - prev_cat.get(cat, 0) > 0 and count >= 3
+    ]
+    risers.sort(key=lambda r: r["delta"], reverse=True)
+
+    return {
+        "available": True,
+        "enough_sample": cur["bad"] >= MIN_SAMPLE and prev["bad"] >= MIN_SAMPLE,
+        "min_sample": MIN_SAMPLE,
+        "current": {"bad": cur["bad"], "total": cur["total"]},
+        "previous": {"bad": prev["bad"], "total": prev["total"]},
+        "rows": rows,
+        "risers": risers[:3],
+        "series": tl.get("series", []),
+    }
+
+
+def _day_point(day_rows: list[dict]) -> dict:
+    """趋势图上的一个点：当天的差评率、评论量、平均分。
+
+    同时给出 bad / count，让上层能算滚动比率 —— 单日比率没法直接画。
+    """
+    agg = M.review_aggregate(day_rows)
+    return {
+        "bad_rate": round(agg["bad_rate"], 4),
+        "bad": agg["bad"],
+        "count": agg["total"],
+        "avg": agg["avg_rating"],
+    }
+
+
+def _smooth_series(series: list[dict], span: int = 7) -> list[dict]:
+    """把每日差评率换成「近 span 天滚动差评率」。
+
+    为什么必须滚动：一天 5-8 条评论，按天算的差评率不是 0% 就是 33%，
+    折线图看起来像电锯 —— 有锯齿，没有趋势。
+    滚动之后才看得出「在变好还是变坏」，这本来就是按月看评论的意义。
+    """
+    out: list[dict] = []
+    for i, point in enumerate(series):
+        window = series[max(0, i - span + 1): i + 1]
+        total = sum(int(w.get("count", 0) or 0) for w in window)
+        bad = sum(int(w.get("bad", 0) or 0) for w in window)
+        item = dict(point)
+        # 滚动窗口里评论太少时不给点 —— 画一个基于 2 条评论的比率没有意义
+        if total >= 10:
+            item["bad_rate"] = round(bad / total, 4)
+            item["has_data"] = True
+        else:
+            item["has_data"] = False
+        out.append(item)
+    return out
+
+
+def _public_timeline(tl: dict, trend: dict | None) -> dict:
+    """整理成 JSON 形状。原始评论行不带出去 —— 那是几百条文本。"""
+    def meta(window: dict | None) -> dict | None:
+        if not window:
+            return None
+        return {
+            key: window[key]
+            for key in ("start", "end", "row_count", "coverage", "days_with_data")
+        }
+
+    return {
+        "available": tl["available"],
+        "reason": tl["reason"],
+        "assumption": tl.get("assumption", ""),
+        "window_days": tl["window_days"],
+        "range": tl.get("range"),
+        "current": meta(tl.get("current")),
+        "previous": meta(tl.get("previous")),
+        "series": tl.get("series", []),
+        "change": (trend or {}).get("rows", []),
+        "risers": (trend or {}).get("risers", []),
+        "enough_sample": (trend or {}).get("enough_sample", False),
+        "min_sample": (trend or {}).get("min_sample", 10),
+        "smooth_days": 7,
+    }

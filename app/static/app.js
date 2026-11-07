@@ -350,6 +350,175 @@
       <table><thead><tr><th>时间</th><th>段落</th><th>口播</th><th>画面</th></tr></thead><tbody>${rows}</tbody></table></div>`;
   }
 
+  /* ================= 时间轴：趋势图 + 本期对比 ================= */
+
+  function fmtByKind(value, kind) {
+    if (kind === "money") return money(value);
+    if (kind === "pct") return pct(value, 2);
+    if (kind === "int") return String(Math.round(value));
+    return num(value);
+  }
+
+  // 内联 SVG 折线，不引图表库：一张图 30 个点，为它加 200KB 依赖不划算
+  function sparkline(points, key, windowDays) {
+    const usable = points.filter((p) => p.has_data && typeof p[key] === "number");
+    if (usable.length < 2) return "";
+
+    const W = 620, H = 96, PAD_X = 8, PAD_Y = 12;
+    const values = usable.map((p) => p[key]);
+    const min = Math.min(...values);
+    const max = Math.max(...values);
+    const span = max - min || Math.abs(max) || 1;
+    const step = points.length > 1 ? (W - PAD_X * 2) / (points.length - 1) : 0;
+
+    const x = (i) => PAD_X + i * step;
+    const y = (v) => H - PAD_Y - ((v - min) / span) * (H - PAD_Y * 2);
+
+    // 缺数据的日子要断开，不能连成一条假的直线
+    let segments = [];
+    let current = [];
+    points.forEach((p, i) => {
+      if (p.has_data && typeof p[key] === "number") {
+        current.push(`${x(i).toFixed(1)},${y(p[key]).toFixed(1)}`);
+      } else if (current.length) {
+        segments.push(current);
+        current = [];
+      }
+    });
+    if (current.length) segments.push(current);
+
+    const lines = segments
+      .map((seg) => {
+        if (seg.length === 1) {
+          const [cx, cy] = seg[0].split(",");
+          return `<circle cx="${cx}" cy="${cy}" r="2" fill="#2f5cff"/>`;
+        }
+        return `<polyline points="${seg.join(" ")}" fill="none" stroke="#2f5cff" stroke-width="1.8"
+                 vector-effect="non-scaling-stroke"
+                 stroke-linejoin="round" stroke-linecap="round"/>`;
+      })
+      .join("");
+
+    // 把「近 N 天」的窗口标出来 —— 否则看不出对比的是哪一段
+    const shadeStart = Math.max(0, points.length - windowDays);
+    const shade = shadeStart > 0 && shadeStart < points.length
+      ? `<rect x="${x(shadeStart).toFixed(1)}" y="0" width="${(x(points.length - 1) - x(shadeStart)).toFixed(1)}"
+           height="${H}" fill="#2f5cff" opacity="0.06"/>`
+      : "";
+
+    const lastIdx = points.length - 1;
+    const lastPoint = points[lastIdx];
+
+    const kind = key === "cost" ? "money" : key === "bad_rate" ? "pct" : "num";
+
+    // 文字不放进 SVG：preserveAspectRatio="none" 会把文字横向拉扁，
+    // 数值标签改用 HTML，既不变形也不会压住折线
+    return `<div class="spark-meta">最高 ${fmtByKind(max, kind)} · 最低 ${fmtByKind(min, kind)}</div>
+    <svg class="spark" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img">
+      ${shade}
+      <line x1="${PAD_X}" y1="${H - PAD_Y}" x2="${W - PAD_X}" y2="${H - PAD_Y}"
+            stroke="#e5e7eb" stroke-width="1" vector-effect="non-scaling-stroke"/>
+      ${lines}
+      ${lastPoint && lastPoint.has_data && typeof lastPoint[key] === "number"
+        ? `<circle cx="${x(lastIdx).toFixed(1)}" cy="${y(lastPoint[key]).toFixed(1)}" r="3" fill="#2f5cff"/>`
+        : ""}
+    </svg>`;
+  }
+
+  // 比率的「差」要说百分点（pp），不是百分比：
+  // 差评率 12.4% → 16.4% 是 +4pp，写成 +4% 会被读成「相对上涨 4%」
+  function fmtDelta(row, kind) {
+    if (kind === "pct") return `${(Math.abs(row.delta) * 100).toFixed(2)}pp`;
+    return fmtByKind(Math.abs(row.delta), kind);
+  }
+
+  function renderTimeline(tl, opts = {}) {
+    if (!tl) return "";
+
+    if (!tl.available) {
+      return `<div class="tl-block">
+        <div class="block-title">趋势对比</div>
+        <p class="tl-note warn">${esc(tl.reason || "没有可用的日期")}</p>
+      </div>`;
+    }
+
+    const cur = tl.current || {};
+    const prev = tl.previous || {};
+    const win = tl.window_days;
+    const series = tl.series || [];
+
+    const spark = sparkline(series, opts.metric || "roas", win);
+    const coverage = [cur, prev].some((w) => (w.coverage ?? 1) < 1)
+      ? `<p class="tl-note warn">覆盖率不完整：本期 ${cur.days_with_data}/${win} 天、上期 ${prev.days_with_data}/${win} 天有数据</p>`
+      : "";
+
+    const changeRows = (tl.change || [])
+      .map((r) => {
+        const cls = r.trend === "better" ? "better" : r.trend === "worse" ? "worse" : "same";
+        // 判定为「持平」时不再用方向箭头：CTR 动 0.01pp 却显示 ↑，会被读成一个趋势
+        // flat 类指标（花费）只报数值不判好坏，用一个短横代替方向箭头
+        const arrow =
+          r.direction === "flat"
+            ? "–"
+            : r.trend === "same"
+              ? (Math.abs(r.delta) < 1e-9 ? "=" : "≈")
+              : r.delta > 0 ? "↑" : "↓";
+        const kind = r.fmt || (r.key.includes("rate") ? "pct" : "num");
+        return `<div class="tl-row">
+          <span class="tl-k">${esc(r.label)}</span>
+          <span class="tl-v">${fmtByKind(r.prev, kind)}</span>
+          <span class="tl-a">→</span>
+          <span class="tl-v strong">${fmtByKind(r.curr, kind)}</span>
+          <span class="tl-d ${cls}">${arrow} ${fmtDelta(r, kind)}</span>
+        </div>`;
+      })
+      .join("");
+
+    const movers = (tl.campaigns || [])
+      .filter((c) => c.trend !== "same")
+      .slice(0, 6)
+      .map((c) => {
+        const cls = c.trend === "worse" ? "worse" : c.trend === "better" ? "better" : "same";
+        const label = c.trend === "worse" ? "恶化" : c.trend === "better" ? "改善" : "持续零单";
+        const level = c.level_prev && c.level_curr && c.level_prev !== c.level_curr
+          ? `<span class="tl-lv">${esc(c.level_prev)} → ${esc(c.level_curr)}</span>`
+          : "";
+        return `<div class="tl-mover ${cls}">
+          <span class="tl-mv-name">${esc(c.name)}</span>
+          ${level}
+          <span class="tl-mv-val">${num(c.prev)} → ${num(c.curr)}</span>
+          <span class="tl-mv-tag ${cls}">${label}</span>
+          ${c.note ? `<span class="tl-mv-note">${esc(c.note)}</span>` : ""}
+        </div>`;
+      })
+      .join("");
+
+    const risers = (tl.risers || [])
+      .map(
+        (r) => `<div class="tl-mover worse">
+          <span class="tl-mv-name">${esc(r.category)}</span>
+          <span class="tl-mv-val">${r.prev} → ${r.curr} 条</span>
+          <span class="tl-mv-tag worse">${r.prev === 0 ? "新增" : "增多"}</span>
+        </div>`
+      )
+      .join("");
+
+    return `<div class="tl-block">
+      <div class="block-title">
+        趋势对比
+        <span class="tl-range">前 ${win} 天 ${esc(prev.start || "")} ~ ${esc(prev.end || "")}
+        ｜近 ${win} 天 ${esc(cur.start || "")} ~ ${esc(cur.end || "")}</span>
+      </div>
+      ${spark}
+      ${opts.sparkLabel ? `<p class="tl-note">${esc(opts.sparkLabel)}</p>` : ""}
+      ${coverage}
+      <div class="tl-rows">${changeRows}</div>
+      ${movers ? `<div class="block-title" style="margin-top:14px">逐组变化</div><div class="tl-movers">${movers}</div>` : ""}
+      ${risers ? `<div class="block-title" style="margin-top:14px">近期新增的问题类型</div><div class="tl-movers">${risers}</div>` : ""}
+      ${tl.assumption ? `<p class="tl-note">${esc(tl.assumption)}</p>` : ""}
+    </div>`;
+  }
+
   function renderAds(m) {
     const s = m.summary || {};
     const t = m.thresholds || {};
@@ -376,6 +545,7 @@
       .join("");
 
     return `${cards}
+      ${renderTimeline(m.timeline, { metric: "roas", sparkLabel: "每日整体 ROAS（右侧浅色区域为近 7 天对比窗口）" })}
       <div style="margin-top:14px">
       <table><thead><tr><th>分级</th><th>广告组 / 诊断</th><th>花费</th><th>ROAS</th><th>CTR</th><th>订单</th><th>CPA</th></tr></thead>
       <tbody>${rows}</tbody></table></div>`;
@@ -427,6 +597,10 @@
       .join("");
 
     return `${cards}
+      ${renderTimeline(m.timeline, {
+        metric: "bad_rate",
+        sparkLabel: "近 7 天滚动差评率（右侧浅色区域为近 28 天对比窗口）",
+      })}
       <div style="margin-top:14px">
       <table><thead><tr><th>归因</th><th>条数</th><th>占差评</th><th>类型</th><th>修补动作</th></tr></thead>
       <tbody>${rows}</tbody></table></div>`;
@@ -639,6 +813,7 @@
           <button class="btn btn-sm" data-pick="${d.kind}">选择 CSV</button>
           <span class="slot-status muted" id="status-${d.kind}">未选择</span>
         </div>
+        <div class="slot-warn" id="warn-${d.kind}" hidden></div>
       </div>`
     ).join("");
 
@@ -673,9 +848,24 @@
       if (!res.ok) throw new Error(data.detail || res.statusText);
 
       datasetState[kind] = data.id;
-      status.textContent = `✓ ${data.row_count} 行${data.skipped ? `（跳过 ${data.skipped}）` : ""}`;
+      const di = data.date_info;
+      // 日期能不能用，比「解析了几行」更影响结论 —— 直接显示出来
+      const dateBit = di
+        ? ` · ${di.days} 天（${di.first} ~ ${di.last}${di.assumed ? "，日序按平台习惯" : ""}）`
+        : kind === "products"
+          ? ""
+          : " · 无日期，不做趋势";
+      status.textContent = `✓ ${data.row_count} 行${data.skipped ? `（跳过 ${data.skipped}）` : ""}${dateBit}`;
       status.classList.add("ok");
       if (data.warnings?.length) status.title = data.warnings.join("\n");
+      if (data.warnings?.length) {
+        // 有假设就把假设摊开说，别等用户看到错位的趋势图才发现
+        const warn = $(`#warn-${kind}`);
+        if (warn) {
+          warn.innerHTML = data.warnings.map((w) => `· ${esc(w)}`).join("<br>");
+          warn.hidden = false;
+        }
+      }
       loadDatasets();
     } catch (e) {
       status.textContent = `✗ ${e.message}`;

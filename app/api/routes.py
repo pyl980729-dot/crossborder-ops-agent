@@ -13,6 +13,7 @@ from app.core import config as app_config
 from app.core import datasets as ds
 from app.core.contracts import STAGE_ORDER, contract_catalog
 from app.core.logging import get_logger
+from app.core.platforms import get_platform
 from app.core.cron import validate as validate_cron
 from app.core.llm import provider_info
 from app.core.platforms import platform_list
@@ -208,8 +209,11 @@ async def upload_dataset(
     if len(raw) > MAX_UPLOAD_BYTES:
         raise HTTPException(status_code=413, detail="文件超过 10MB")
 
+    # 日期顺序的兜底假设跟随店铺所在平台：巴西/欧洲是 日/月，Amazon 是 月/日
+    store = db.get_store(p.store_id)
+    platform = get_platform((store or {}).get("platform"))
     try:
-        parsed = ds.parse_csv(raw, kind)
+        parsed = ds.parse_csv(raw, kind, order=platform.date_order)
     except ds.DatasetError as exc:
         log.warning("dataset upload rejected kind=%s file=%s err=%s", kind, file.filename, exc)
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -228,6 +232,7 @@ async def upload_dataset(
         "skipped": parsed["skipped"],
         "ignored_columns": parsed["ignored_columns"],
         "warnings": parsed["warnings"],
+        "date_info": parsed.get("date_info"),
         "preview": parsed["preview"],
     }
 
