@@ -390,7 +390,10 @@
     const cards = `<div class="metric-grid">${[
       metricCard("评论总数", int(a.total), `平均分 ${a.avg_rating}`),
       metricCard("好评率", pct(a.good_rate), `差评 ${a.bad_count} 条`),
-      metricCard("归因覆盖率", pct(coverage), `自动分掉 ${c.auto ?? 0}/${c.total ?? 0} 条`),
+      // 全部都是人工标注时显示 0% 会让人以为自动分类失效了，换个说法
+      (c.auto ?? 0) > 0
+        ? metricCard("归因覆盖率", pct(coverage), `自动分掉 ${c.auto}/${c.needing ?? 0} 条`)
+        : metricCard("归因方式", "人工标注", `${c.manual ?? 0} 条为已有标注`),
       metricCard(
         "待人工确认",
         pending,
