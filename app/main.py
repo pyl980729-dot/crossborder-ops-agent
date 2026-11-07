@@ -20,6 +20,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app import db
+from app.api.deps import resolve_principal
 from app.api.routes import router
 from app.core.contracts import STAGE_ORDER
 from app.core.logging import get_logger, setup_logging
@@ -50,38 +51,22 @@ app.add_middleware(
 app.include_router(router)
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
-# 不需要鉴权的路径
-PUBLIC_PATHS = {"/", "/api/health", "/favicon.ico", "/docs", "/openapi.json", "/redoc"}
+# 不需要登录的路径
+PUBLIC_PATHS = {
+    "/", "/api/health", "/favicon.ico", "/docs", "/openapi.json", "/redoc",
+    "/api/auth/login", "/api/auth/setup", "/api/auth/me", "/api/auth/status",
+}
 
 
-def _check_auth(request: Request) -> JSONResponse | None:
-    """返回 None 表示放行。没配置 token 时永远放行。"""
-    token = os.getenv("ECOM_API_TOKEN", "").strip()
-    if not token:
-        return None
+def _login_required(request: Request, principal) -> bool:
+    """系统里一旦有了用户，/api 就必须登录。
 
+    「开放模式」（无用户 + 无服务令牌）视为 owner，保证 clone 下来直接能用。
+    """
+    if principal.authenticated or principal.via == "open":
+        return False
     path = request.url.path
-    if not path.startswith("/api") or path in PUBLIC_PATHS:
-        return None
-
-    provided = request.headers.get("X-API-Token", "")
-    if not provided:
-        auth = request.headers.get("Authorization", "")
-        if auth.lower().startswith("bearer "):
-            provided = auth[7:].strip()
-
-    try:
-        ok = bool(provided) and secrets.compare_digest(provided, token)
-    except TypeError:  # 非 ASCII token，compare_digest 会拒
-        ok = provided == token
-
-    if ok:
-        return None
-    return JSONResponse(
-        {"detail": "未授权：请在请求头带上 X-API-Token"},
-        status_code=401,
-        headers={"WWW-Authenticate": "Bearer"},
-    )
+    return path.startswith("/api") and path not in PUBLIC_PATHS
 
 
 @app.middleware("http")
@@ -90,12 +75,17 @@ async def request_pipeline(request: Request, call_next):
     request.state.request_id = rid
     started = time.perf_counter()
 
-    denied = _check_auth(request)
-    if denied is not None:
+    principal = resolve_principal(request)
+    request.state.principal = principal
+
+    if _login_required(request, principal):
         ms = (time.perf_counter() - started) * 1000
-        log.warning("[%s] %s %s → 401 (%.0fms)", rid, request.method, request.url.path, ms)
-        denied.headers["X-Request-ID"] = rid
-        return denied
+        log.warning("[%s] %s %s → 401 未登录 (%.0fms)", rid, request.method, request.url.path, ms)
+        resp = JSONResponse(
+            {"detail": "未登录：请先登录", "need_login": True}, status_code=401
+        )
+        resp.headers["X-Request-ID"] = rid
+        return resp
 
     try:
         response = await call_next(request)
@@ -116,8 +106,9 @@ async def request_pipeline(request: Request, call_next):
 def _startup() -> None:
     db.init_db()
     autostart()
-    token_on = bool(os.getenv("ECOM_API_TOKEN", "").strip())
-    log.info("服务启动 | 鉴权=%s | 调度器=%s", "开启" if token_on else "关闭(开放模式)", get_scheduler().state)
+    users = db.count_users()
+    mode = "已初始化用户，需登录" if users else "开放模式（无用户，可直接访问）"
+    log.info("服务启动 | 访问模式=%s | 用户数=%s | 调度器=%s", mode, users, get_scheduler().state)
 
 
 @app.on_event("shutdown")

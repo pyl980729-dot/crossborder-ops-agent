@@ -2,7 +2,7 @@
 (() => {
   "use strict";
 
-  const state = { run: null, active: null, running: false };
+  const state = { run: null, active: null, running: false, me: null };
 
   const $ = (sel) => document.querySelector(sel);
   const el = (tag, cls, html) => {
@@ -25,8 +25,12 @@
   const TOKEN_KEY = "ecom_api_token";
   const getToken = () => localStorage.getItem(TOKEN_KEY) || "";
   const authHeaders = () => {
-    const t = getToken();
-    return t ? { "X-API-Token": t } : {};
+    const headers = {};
+    const apiToken = getToken();
+    if (apiToken) headers["X-API-Token"] = apiToken;
+    const sessionToken = localStorage.getItem("ecom_session_token");
+    if (sessionToken) headers["X-Session-Token"] = sessionToken;
+    return headers;
   };
 
   async function api(path, opts = {}, retried = false) {
@@ -62,6 +66,9 @@
     } catch (e) {
       $("#llm-badge").textContent = "服务未就绪";
     }
+    const ok = await checkAuth();
+    if (!ok) return;
+
     loadHistory();
 
     $("#run-btn").addEventListener("click", runPipeline);
@@ -75,6 +82,10 @@
 
     $("#cfg-platform").addEventListener("change", loadConfig);
     $("#cfg-reset").addEventListener("click", resetConfig);
+    $("#logout-btn").addEventListener("click", doLogout);
+    $("#add-member").addEventListener("click", addMember);
+    $("#add-store").addEventListener("click", addStore);
+    $("#store-pill").addEventListener("click", () => switchView("members"));
   }
 
   /* ---------------- 运行 ---------------- */
@@ -483,6 +494,11 @@
     $("#view-auto").hidden = name !== "auto";
     $("#view-data").hidden = name !== "data";
     $("#view-config").hidden = name !== "config";
+    $("#view-members").hidden = name !== "members";
+    if (name === "members") {
+      loadMembers();
+      loadStores();
+    }
     if (name === "auto") loadAutomation();
     if (name === "data") {
       initDataView();
@@ -959,6 +975,231 @@
           ? `<p class="preview-note" style="margin-top:12px">另有 ${pending.new.length} 条新增 P0，去「工作流」页看完整动作清单。</p>`
           : ""
       }`;
+  }
+
+  /* ================= 认证 ================= */
+  async function checkAuth() {
+    try {
+      const res = await fetch("/api/auth/me", { headers: authHeaders() });
+      const me = await res.json();
+      if (me.need_login) {
+        openLogin();
+        return false;
+      }
+      state.me = me;
+      renderUserBox(me);
+      return true;
+    } catch (_) {
+      return true; // 网络异常不阻塞界面
+    }
+  }
+
+  function renderUserBox(me) {
+    $("#user-box").hidden = false;
+    $("#user-chip").textContent = `${me.display_name} · ${me.role_label}`;
+    $("#store-pill").textContent = me.store_name || "默认店铺";
+    // 只有负责人能看到成员页
+    $("#tab-members").hidden = me.role !== "owner";
+  }
+
+  async function openLogin() {
+    const overlay = $("#auth-overlay");
+    overlay.hidden = false;
+
+    const st = await fetch("/api/auth/status").then((r) => r.json());
+    const initialized = st.initialized;
+
+    $("#auth-card").innerHTML = `
+      <h2>${initialized ? "登录" : "初始化"}</h2>
+      <p class="sub">${initialized
+        ? "跨境运营数据涉及成本与投放，需要登录后查看。"
+        : "系统里还没有账号。先创建负责人账号，之后可以添加运营和只读成员。"}</p>
+      <div id="auth-err" class="auth-err" hidden></div>
+      <div class="auth-field">
+        <label>用户名</label>
+        <input id="a-user" autocomplete="username" placeholder="至少 2 位">
+      </div>
+      ${initialized ? "" : `<div class="auth-field"><label>显示名</label><input id="a-display" placeholder="例如 张三"></div>`}
+      <div class="auth-field">
+        <label>密码</label>
+        <input id="a-pass" type="password" autocomplete="current-password" placeholder="至少 6 位">
+      </div>
+      <div class="auth-field" id="a-store-field" ${initialized && st.stores.length > 1 ? "" : "hidden"}>
+        <label>店铺</label>
+        <select id="a-store">
+          ${(st.stores || []).map((s) => `<option value="${esc(s.id)}">${esc(s.name)}</option>`).join("")}
+        </select>
+      </div>
+      <button class="btn btn-primary" id="auth-submit">${initialized ? "登录" : "创建并进入"}</button>
+      ${initialized ? "" : `<p class="muted" style="margin:14px 0 0;font-size:11.5px">负责人拥有全部权限：改核心阈值、管理成员、审批动作。</p>`}
+    `;
+
+    const submit = async () => {
+      const username = $("#a-user").value.trim();
+      const password = $("#a-pass").value;
+      if (!username || password.length < 6) {
+        return showAuthError("用户名必填，密码至少 6 位");
+      }
+      const body = initialized
+        ? { username, password, store_id: $("#a-store")?.value || null }
+        : { username, password, display_name: $("#a-display")?.value.trim() || username };
+
+      const res = await fetch(initialized ? "/api/auth/login" : "/api/auth/setup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) return showAuthError(data.detail || "操作失败");
+
+      if (data.token) localStorage.setItem("ecom_session_token", data.token);
+      location.reload();
+    };
+
+    $("#auth-submit").addEventListener("click", submit);
+    $("#auth-card").querySelectorAll("input").forEach((el) => {
+      el.addEventListener("keydown", (e) => { if (e.key === "Enter") submit(); });
+    });
+  }
+
+  function showAuthError(msg) {
+    const box = $("#auth-err");
+    box.hidden = false;
+    box.textContent = msg;
+  }
+
+  async function doLogout() {
+    await fetch("/api/auth/logout", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+    });
+    localStorage.removeItem("ecom_session_token");
+    location.reload();
+  }
+
+  /* ================= 成员 ================= */
+  async function loadMembers() {
+    try {
+      const data = await api("/api/users");
+      const roles = Object.fromEntries((data.roles || []).map((r) => [r.key, r.label]));
+      const box = $("#member-list");
+      if (!data.users?.length) {
+        box.innerHTML = `<p class="muted">还没有成员</p>`;
+        return;
+      }
+      box.innerHTML = data.users
+        .map(
+          (u) => `<div class="member-row">
+            <div class="who">
+              <b>${esc(u.display_name)}</b><span>${esc(u.username)}</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px">
+              <select data-role-for="${esc(u.id)}" class="role-select">
+                ${Object.entries(roles)
+                  .map(([k, v]) => `<option value="${k}" ${k === u.role ? "selected" : ""}>${v}</option>`)
+                  .join("")}
+              </select>
+              <button class="btn btn-sm danger" data-del-user="${esc(u.id)}">移除</button>
+            </div>
+          </div>`
+        )
+        .join("");
+
+      box.querySelectorAll("[data-role-for]").forEach((sel) => {
+        sel.addEventListener("change", async () => {
+          try {
+            await api(`/api/users/${sel.dataset.roleFor}?role=${sel.value}`, { method: "PATCH" });
+            loadMembers();
+          } catch (e) {
+            alert(`修改失败：${e.message}`);
+            loadMembers();
+          }
+        });
+      });
+      box.querySelectorAll("[data-del-user]").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+          if (!confirm("移除这个成员？他将无法再访问本店铺。")) return;
+          try {
+            await api(`/api/users/${btn.dataset.delUser}`, { method: "DELETE" });
+            loadMembers();
+          } catch (e) {
+            alert(`移除失败：${e.message}`);
+          }
+        });
+      });
+    } catch (e) {
+      $("#member-list").innerHTML = `<p class="muted">加载失败：${esc(e.message)}</p>`;
+    }
+  }
+
+  async function addMember() {
+    const body = {
+      username: $("#m-username").value.trim(),
+      display_name: $("#m-display").value.trim(),
+      password: $("#m-password").value,
+      role: $("#m-role").value,
+    };
+    if (!body.username || body.password.length < 6) {
+      return alert("用户名必填，密码至少 6 位");
+    }
+    try {
+      await api("/api/users", { method: "POST", body: JSON.stringify(body) });
+      $("#m-username").value = "";
+      $("#m-display").value = "";
+      $("#m-password").value = "";
+      loadMembers();
+    } catch (e) {
+      alert(`添加失败：${e.message}`);
+    }
+  }
+
+  /* ================= 店铺 ================= */
+  async function loadStores() {
+    try {
+      const data = await api("/api/stores");
+      const box = $("#store-list");
+      box.innerHTML = (data.stores || [])
+        .map(
+          (s) => `<div class="store-row">
+            <div>
+              <b>${esc(s.name)}</b>
+              <span class="mono" style="color:#9ca3af;margin-left:6px">${esc(s.id)}</span>
+              ${s.id === data.current ? `<span class="role-badge owner" style="margin-left:8px">当前</span>` : ""}
+            </div>
+            ${s.id === data.current ? "" : `<button class="btn btn-sm" data-switch="${esc(s.id)}">切换过去</button>`}
+          </div>`
+        )
+        .join("");
+
+      box.querySelectorAll("[data-switch]").forEach((btn) => {
+        btn.addEventListener("click", () => switchStore(btn.dataset.switch));
+      });
+    } catch (e) {
+      $("#store-list").innerHTML = `<p class="muted">加载失败：${esc(e.message)}</p>`;
+    }
+  }
+
+  async function addStore() {
+    const name = $("#s-name").value.trim();
+    if (!name) return alert("请填店铺名");
+    try {
+      await api(`/api/stores?name=${encodeURIComponent(name)}&platform=${$("#s-platform").value}`, {
+        method: "POST",
+      });
+      $("#s-name").value = "";
+      loadStores();
+    } catch (e) {
+      alert(`新建失败：${e.message}`);
+    }
+  }
+
+  async function switchStore(storeId) {
+    try {
+      await api(`/api/auth/switch-store?store_id=${encodeURIComponent(storeId)}`, { method: "POST" });
+      location.reload();
+    } catch (e) {
+      alert(`切换失败：${e.message}`);
+    }
   }
 
   boot();

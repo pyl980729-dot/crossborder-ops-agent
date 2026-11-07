@@ -61,7 +61,7 @@ class Scheduler:
             now = datetime.now().replace(second=0, microsecond=0)
             self.last_tick = now.isoformat(timespec="seconds")
 
-            for sched in db.list_schedules():
+            for sched in db.list_schedules_all():
                 if not sched["enabled"]:
                     continue
                 try:
@@ -115,6 +115,7 @@ class Scheduler:
                 payload,
                 schedule_id=sched["id"],
                 trigger="scheduler",
+                store_id=sched.get("store_id") or "default",
             )
             db.touch_schedule(sched["id"], result["run_id"], started_at)
             self.executed_count += 1
@@ -141,10 +142,12 @@ class Scheduler:
             }
 
     # ---- 状态 ----
-    def status(self) -> dict:
+    def status(self, store_id: str | None = None) -> dict:
+        """store_id 为空时返回全部（调度器自检用），否则只返回该店铺的任务。"""
         tasks = []
         now = datetime.now().replace(second=0, microsecond=0)
-        for sched in db.list_schedules():
+        schedules = db.list_schedules(store_id) if store_id else db.list_schedules_all()
+        for sched in schedules:
             try:
                 cron = Cron(sched["cron"])
                 next_at = cron.next_after(self._anchor(sched))

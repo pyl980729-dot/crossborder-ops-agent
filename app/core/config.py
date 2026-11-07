@@ -157,6 +157,8 @@ SOURCE_LABEL = {
 class Config:
     """一次运行内生效的阈值集合，每个值都带来源。"""
 
+    store_id: str = "default"
+
     def __init__(self, values: dict[str, float], sources: dict[str, str], platform: str = ""):
         self._values = values
         self._sources = sources
@@ -221,8 +223,15 @@ def _coerce(key: str, raw: Any) -> float | None:
     return value
 
 
-def load_config(platform: str | None = None, request_overrides: dict | None = None) -> Config:
-    """按优先级合成一次运行使用的阈值。"""
+def load_config(
+    platform: str | None = None,
+    request_overrides: dict | None = None,
+    store_id: str = "default",
+) -> Config:
+    """按优先级合成一次运行使用的阈值。
+
+    界面覆盖值按店铺隔离：A 店把 CTR 基准调到 5%，不能影响 B 店。
+    """
     values = {k: d.default for k, d in THRESHOLDS.items()}
     sources = {k: "default" for k in THRESHOLDS}
 
@@ -235,7 +244,7 @@ def load_config(platform: str | None = None, request_overrides: dict | None = No
 
     # 界面保存的覆盖
     try:
-        for key, raw in db.get_settings().items():
+        for key, raw in db.get_settings(store_id).items():
             val = _coerce(key, raw)
             if val is not None:
                 values[key] = val
@@ -251,10 +260,12 @@ def load_config(platform: str | None = None, request_overrides: dict | None = No
                 values[key] = val
                 sources[key] = "request"
 
-    return Config(values, sources, platform or "")
+    cfg = Config(values, sources, platform or "")
+    cfg.store_id = store_id
+    return cfg
 
 
-def update_overrides(patch: dict) -> dict:
+def update_overrides(patch: dict, store_id: str = "default") -> dict:
     """保存界面上的修改。空值表示恢复默认（删除该条覆盖）。"""
     accepted: dict[str, float] = {}
     rejected: list[str] = []
@@ -274,13 +285,13 @@ def update_overrides(patch: dict) -> dict:
             accepted[key] = val
 
     for key in resetting:
-        db.delete_setting(key)
+        db.delete_setting(key, store_id)
     if accepted:
-        db.save_settings(accepted)
+        db.save_settings(accepted, store_id)
 
     return {"updated": list(accepted), "reset": resetting, "rejected": rejected}
 
 
-def reset_all() -> None:
+def reset_all(store_id: str = "default") -> None:
     for key in THRESHOLDS:
-        db.delete_setting(key)
+        db.delete_setting(key, store_id)

@@ -666,3 +666,69 @@ main { min-height: calc(100vh - 150px); }
   .cfg-row { grid-template-columns: 1fr; gap: 6px; }
   .cfg-control { justify-self: start; }
 }
+
+
+/* ================= 登录 / 成员 ================= */
+.auth-overlay {
+  position: fixed; inset: 0; z-index: 100;
+  background: rgba(244,245,247,.97);
+  backdrop-filter: blur(6px);
+  display: grid; place-items: center;
+  padding: 24px;
+}
+.auth-card {
+  width: 100%; max-width: 380px;
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: 16px; padding: 32px;
+  box-shadow: 0 20px 60px -20px rgba(16,24,40,.25);
+}
+.auth-card h2 { margin: 0 0 4px; font-size: 19px; letter-spacing: -.3px; }
+.auth-card .sub { font-size: 12.5px; color: var(--muted); margin: 0 0 22px; }
+.auth-field { margin-bottom: 12px; }
+.auth-field label { display: block; font-size: 11.5px; color: var(--muted); margin-bottom: 4px; }
+.auth-field input, .auth-field select {
+  width: 100%; padding: 9px 12px; border-radius: 9px;
+  border: 1px solid var(--line-strong); background: var(--surface);
+  font-size: 13px; font-family: inherit; color: var(--text);
+}
+.auth-field input:focus, .auth-field select:focus {
+  outline: none; border-color: var(--brand); box-shadow: 0 0 0 3px rgba(47,92,255,.1);
+}
+.auth-err {
+  font-size: 12px; color: var(--risk); background: var(--risk-soft);
+  border-radius: 8px; padding: 8px 11px; margin-bottom: 12px;
+}
+.auth-card .btn { width: 100%; justify-content: center; margin-top: 6px; }
+
+.user-box { display: flex; align-items: center; gap: 8px; }
+.store-pill {
+  border: 1px solid var(--line-strong); background: var(--surface);
+  padding: 5px 12px; border-radius: 8px; font-size: 12px;
+  cursor: pointer; font-family: inherit; color: var(--text);
+  max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.store-pill:hover { border-color: var(--brand); color: var(--brand); }
+.user-chip {
+  font-size: 12px; padding: 4px 10px; border-radius: 999px;
+  background: var(--brand-soft); color: var(--brand); font-weight: 550;
+}
+
+.member-row, .store-row {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; padding: 11px 0; border-bottom: 1px solid #f1f2f4;
+  font-size: 12.5px;
+}
+.member-row:last-child, .store-row:last-child { border-bottom: none; }
+.member-row .who b { font-size: 13px; }
+.member-row .who span { color: var(--muted); margin-left: 6px; font-family: var(--mono); font-size: 11.5px; }
+.role-badge {
+  font-size: 10.5px; padding: 2px 8px; border-radius: 5px; font-weight: 600;
+}
+.role-badge.owner { background: var(--warn-soft); color: var(--warn); }
+.role-badge.operator { background: var(--info-soft); color: var(--info); }
+.role-badge.viewer { background: var(--surface-2); color: var(--muted); border: 1px solid var(--line); }
+.role-note { font-size: 11px; color: var(--muted); }
+.new-task-row select {
+  padding: 8px 12px; border-radius: 8px; border: 1px solid var(--line-strong);
+  background: var(--surface); font-size: 12.5px; font-family: inherit; color: var(--text);
+}

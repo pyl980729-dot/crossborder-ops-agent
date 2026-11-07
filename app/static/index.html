@@ -23,9 +23,15 @@
     <button class="tab" data-view="auto">自动化</button>
     <button class="tab" data-view="data">数据</button>
     <button class="tab" data-view="config">阈值</button>
+    <button class="tab" data-view="members" id="tab-members" hidden>成员</button>
   </nav>
 
   <div class="topbar-right">
+    <div class="user-box" id="user-box" hidden>
+      <button class="store-pill" id="store-pill" title="切换店铺">店铺</button>
+      <span class="user-chip" id="user-chip">—</span>
+      <button class="btn btn-sm" id="logout-btn">退出</button>
+    </div>
     <span class="badge" id="llm-badge">检测中…</span>
     <button class="btn btn-primary" id="run-btn">
       <span class="btn-label">运行全链路</span>
@@ -212,7 +218,57 @@
       <div class="panel-body" id="config-groups"><p class="muted">加载中…</p></div>
     </div>
   </div>
+  <!-- ================= 成员视图 ================= -->
+  <div id="view-members" hidden>
+    <div class="panel">
+      <div class="panel-head">
+        <h3>成员与权限</h3>
+        <span class="hint">只有负责人能改</span>
+      </div>
+      <div class="panel-body" id="member-list"><p class="muted">加载中…</p></div>
+      <div class="new-task">
+        <div class="new-task-row">
+          <input type="text" id="m-username" placeholder="用户名（登录用）" maxlength="32">
+          <input type="text" id="m-display" placeholder="显示名" maxlength="32">
+          <input type="password" id="m-password" placeholder="密码（至少 6 位）" maxlength="64">
+          <select id="m-role">
+            <option value="operator">运营</option>
+            <option value="viewer">只读</option>
+            <option value="owner">负责人</option>
+          </select>
+          <button class="btn" id="add-member">添加</button>
+        </div>
+        <div class="cron-presets">
+          <span>角色说明：</span>
+          <span class="role-note"><b>负责人</b> 可改核心阈值、审批、管人 · <b>运营</b> 可跑诊断传数据、改内容类参数 · <b>只读</b> 只能看</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel" style="margin-top:16px">
+      <div class="panel-head"><h3>店铺</h3><span class="hint">每个店铺的数据、阈值、运行记录互相独立</span></div>
+      <div class="panel-body" id="store-list"><p class="muted">加载中…</p></div>
+      <div class="new-task">
+        <div class="new-task-row">
+          <input type="text" id="s-name" placeholder="店铺名，例如 巴西站-主店" maxlength="40">
+          <select id="s-platform">
+            <option value="shopee_br">Shopee 巴西站</option>
+            <option value="mercadolivre">Mercado Livre</option>
+            <option value="amazon">Amazon</option>
+            <option value="tiktok_shop">TikTok Shop</option>
+            <option value="shopify">Shopify</option>
+          </select>
+          <button class="btn" id="add-store">新建店铺</button>
+        </div>
+      </div>
+    </div>
+  </div>
 </main>
+
+<!-- ================= 登录 / 初始化 ================= -->
+<div id="auth-overlay" class="auth-overlay" hidden>
+  <div class="auth-card" id="auth-card"></div>
+</div>
 
 <footer>
   <span>所有指标可溯源至 <code>app/core/metrics.py</code> · 平台规则快照需发布前复核</span>

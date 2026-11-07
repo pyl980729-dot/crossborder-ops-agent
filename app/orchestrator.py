@@ -78,6 +78,7 @@ def run_stages(
     run_id: str | None = None,
     schedule_id: str | None = None,
     trigger: str = "manual",
+    store_id: str = "default",
 ) -> dict:
     """执行一次完整流水线。
 
@@ -159,10 +160,11 @@ def run_stages(
         "stages_order": stages,
         "trigger": trigger,
         "schedule_id": schedule_id,
+        "store_id": store_id,
     }
 
     # ---- 闭环对比：这次比上次好了没有 ----
-    prev = db.previous_run(schedule_id, run_id)
+    prev = db.previous_run(schedule_id, run_id, store_id=store_id)
     if prev:
         cycle_report = cycle.compare(cycle.baseline_payload(prev), cycle.current_payload(result_payload))
         cycle_report["baseline_run_id"] = prev["id"]
@@ -182,6 +184,7 @@ def run_stages(
         llm_mode=_llm_mode(),
         schedule_id=schedule_id,
         trigger=trigger,
+        store_id=store_id,
     )
     return result_payload
 
