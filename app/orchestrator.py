@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import time
+from datetime import datetime, timezone
 from typing import Any
 
 from app import db
@@ -20,6 +21,7 @@ from app.agents.market import MarketAgent
 from app.agents.review import ReviewAgent
 from app.agents.strategy import StrategyAgent
 from app.agents.video import VideoAgent
+from app.core import cycle
 from app.core.contracts import BACKFLOW_MAP, STAGE_ORDER, StageResult
 
 REGISTRY: dict[str, StageAgent] = {
@@ -70,11 +72,22 @@ def _derive(payload: dict, results: dict[str, StageResult]) -> dict:
     return out
 
 
-def run_stages(payload: dict, stages: list[str] | None = None, run_id: str | None = None) -> dict:
-    """执行一次完整流水线。"""
+def run_stages(
+    payload: dict,
+    stages: list[str] | None = None,
+    run_id: str | None = None,
+    schedule_id: str | None = None,
+    trigger: str = "manual",
+) -> dict:
+    """执行一次完整流水线。
+
+    执行完会自动与上一次运行做闭环对比（同任务优先），
+    所以每次运行都能回答「这次比上次好了没有」。
+    """
     started = time.perf_counter()
     stages = stages or STAGE_ORDER
     run_id = run_id or db.new_run_id()
+    ran_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
 
     results: dict[str, StageResult] = {}
     ordered: list[dict] = []
@@ -139,11 +152,24 @@ def run_stages(payload: dict, stages: list[str] | None = None, run_id: str | Non
         "title": str(title),
         "status": status,
         "elapsed_ms": elapsed,
+        "created_at": ran_at,
         "stages": ordered,
         "backflow": backflow,
         "summary": summary,
         "stages_order": stages,
+        "trigger": trigger,
+        "schedule_id": schedule_id,
     }
+
+    # ---- 闭环对比：这次比上次好了没有 ----
+    prev = db.previous_run(schedule_id, run_id)
+    if prev:
+        cycle_report = cycle.compare(cycle.baseline_payload(prev), cycle.current_payload(result_payload))
+        cycle_report["baseline_run_id"] = prev["id"]
+        cycle_report["baseline_at"] = prev["created_at"]
+    else:
+        cycle_report = cycle.compare({}, cycle.current_payload(result_payload))
+    result_payload["cycle"] = cycle_report
 
     db.save_run(
         run_id=run_id,
@@ -154,14 +180,26 @@ def run_stages(payload: dict, stages: list[str] | None = None, run_id: str | Non
         result=result_payload,
         elapsed_ms=elapsed,
         llm_mode=_llm_mode(),
+        schedule_id=schedule_id,
+        trigger=trigger,
     )
     return result_payload
 
 
 def run_single(stage: str, payload: dict) -> dict:
-    """只跑一个 Stage —— 用于回流后单点重跑。"""
+    """只跑一个 Stage —— 用于回流后单点重跑。
+
+    注意：这里必须和全链路走同一套字段继承，否则会出现
+    「全链路能跑的环节，单点重跑却报缺字段」这种自相矛盾。
+    """
+    data = dict(payload)
+    if not data.get("main_point"):
+        points = data.get("selling_points") or []
+        if points:
+            data["main_point"] = points[0]
+
     agent = get_agent(stage)
-    result = agent.run(payload)
+    result = agent.run(data)
     return result.model_dump()
 
 

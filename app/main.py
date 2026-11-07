@@ -10,6 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from app import db
 from app.api.routes import router
 from app.core.contracts import STAGE_ORDER
+from app.scheduler import get_scheduler, autostart
 
 BASE_DIR = __import__("pathlib").Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
@@ -35,6 +36,12 @@ app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 @app.on_event("startup")
 def _startup() -> None:
     db.init_db()
+    autostart()
+
+
+@app.on_event("shutdown")
+def _shutdown() -> None:
+    get_scheduler().stop()
 
 
 @app.get("/")

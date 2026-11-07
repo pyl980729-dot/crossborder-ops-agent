@@ -28,11 +28,30 @@ CREATE TABLE IF NOT EXISTS runs (
     input_json  TEXT NOT NULL,
     result_json TEXT NOT NULL,
     elapsed_ms  INTEGER NOT NULL DEFAULT 0,
-    llm_mode    TEXT NOT NULL DEFAULT 'rule'
+    llm_mode    TEXT NOT NULL DEFAULT 'rule',
+    schedule_id TEXT,
+    trigger     TEXT NOT NULL DEFAULT 'manual'
 );
 
 CREATE INDEX IF NOT EXISTS idx_runs_created ON runs (created_at DESC);
+
+CREATE TABLE IF NOT EXISTS schedules (
+    id          TEXT PRIMARY KEY,
+    name        TEXT NOT NULL,
+    cron        TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
+    enabled     INTEGER NOT NULL DEFAULT 1,
+    created_at  TEXT NOT NULL,
+    last_run_at TEXT,
+    last_run_id TEXT
+);
 """
+
+# 老库升级：缺列就补上（SQLite 不支持 IF NOT EXISTS 加列，只能试）
+MIGRATIONS = [
+    "ALTER TABLE runs ADD COLUMN schedule_id TEXT",
+    "ALTER TABLE runs ADD COLUMN trigger TEXT NOT NULL DEFAULT 'manual'",
+]
 
 
 def _connect() -> sqlite3.Connection:
@@ -56,6 +75,11 @@ def _open():
 def init_db() -> None:
     with _open() as conn:
         conn.executescript(SCHEMA)
+        for sql in MIGRATIONS:
+            try:
+                conn.execute(sql)
+            except sqlite3.OperationalError:
+                pass  # 列已存在
 
 
 def new_run_id() -> str:
@@ -71,15 +95,18 @@ def save_run(
     result: dict[str, Any],
     elapsed_ms: int,
     llm_mode: str,
+    schedule_id: str | None = None,
+    trigger: str = "manual",
 ) -> None:
     with _open() as conn:
         conn.execute(
             """INSERT OR REPLACE INTO runs
-               (id, created_at, title, status, stages, input_json, result_json, elapsed_ms, llm_mode)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               (id, created_at, title, status, stages, input_json, result_json,
+                elapsed_ms, llm_mode, schedule_id, trigger)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 run_id,
-                datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
                 title,
                 status,
                 ",".join(stages),
@@ -87,6 +114,8 @@ def save_run(
                 json.dumps(result, ensure_ascii=False),
                 elapsed_ms,
                 llm_mode,
+                schedule_id,
+                trigger,
             ),
         )
 
@@ -96,6 +125,7 @@ def get_run(run_id: str) -> dict | None:
         row = conn.execute("SELECT * FROM runs WHERE id = ?", (run_id,)).fetchone()
     if not row:
         return None
+    keys = row.keys()
     return {
         "id": row["id"],
         "created_at": row["created_at"],
@@ -106,14 +136,16 @@ def get_run(run_id: str) -> dict | None:
         "result": json.loads(row["result_json"]),
         "elapsed_ms": row["elapsed_ms"],
         "llm_mode": row["llm_mode"],
+        "schedule_id": row["schedule_id"] if "schedule_id" in keys else None,
+        "trigger": row["trigger"] if "trigger" in keys else "manual",
     }
 
 
 def list_runs(limit: int = 20) -> list[dict]:
     with _open() as conn:
         rows = conn.execute(
-            "SELECT id, created_at, title, status, stages, elapsed_ms, llm_mode "
-            "FROM runs ORDER BY created_at DESC LIMIT ?",
+            "SELECT id, created_at, title, status, stages, elapsed_ms, llm_mode, trigger "
+            "FROM runs ORDER BY rowid DESC LIMIT ?",
             (limit,),
         ).fetchall()
     return [dict(r) for r in rows]
@@ -123,4 +155,105 @@ def stats() -> dict:
     with _open() as conn:
         total = conn.execute("SELECT COUNT(*) AS c FROM runs").fetchone()["c"]
         ok = conn.execute("SELECT COUNT(*) AS c FROM runs WHERE status = 'ok'").fetchone()["c"]
-    return {"total_runs": total, "ok_runs": ok}
+        scheduled = conn.execute(
+            "SELECT COUNT(*) AS c FROM runs WHERE trigger = 'scheduler'"
+        ).fetchone()["c"]
+    return {"total_runs": total, "ok_runs": ok, "scheduled_runs": scheduled}
+
+
+# ---------------------------------------------------------------------------
+# 定时任务
+# ---------------------------------------------------------------------------
+
+def create_schedule(sid: str, name: str, cron: str, payload: dict) -> None:
+    with _open() as conn:
+        conn.execute(
+            "INSERT INTO schedules (id, name, cron, payload_json, enabled, created_at) "
+            "VALUES (?, ?, ?, ?, 1, ?)",
+            (
+                sid,
+                name,
+                cron,
+                json.dumps(payload, ensure_ascii=False),
+                datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            ),
+        )
+
+
+def list_schedules() -> list[dict]:
+    with _open() as conn:
+        rows = conn.execute(
+            "SELECT id, name, cron, enabled, created_at, last_run_at, last_run_id "
+            "FROM schedules ORDER BY created_at"
+        ).fetchall()
+    return [
+        {
+            **dict(r),
+            "enabled": bool(r["enabled"]),
+        }
+        for r in rows
+    ]
+
+
+def get_schedule(sid: str) -> dict | None:
+    with _open() as conn:
+        row = conn.execute("SELECT * FROM schedules WHERE id = ?", (sid,)).fetchone()
+    if not row:
+        return None
+    return {
+        "id": row["id"],
+        "name": row["name"],
+        "cron": row["cron"],
+        "enabled": bool(row["enabled"]),
+        "created_at": row["created_at"],
+        "last_run_at": row["last_run_at"],
+        "last_run_id": row["last_run_id"],
+        "payload": json.loads(row["payload_json"]),
+    }
+
+
+def set_schedule_enabled(sid: str, enabled: bool) -> None:
+    with _open() as conn:
+        conn.execute("UPDATE schedules SET enabled = ? WHERE id = ?", (1 if enabled else 0, sid))
+
+
+def delete_schedule(sid: str) -> None:
+    with _open() as conn:
+        conn.execute("DELETE FROM schedules WHERE id = ?", (sid,))
+
+
+def touch_schedule(sid: str, run_id: str, at: str) -> None:
+    with _open() as conn:
+        conn.execute(
+            "UPDATE schedules SET last_run_at = ?, last_run_id = ? WHERE id = ?",
+            (at, run_id, sid),
+        )
+
+
+def previous_run(schedule_id: str | None, exclude_run_id: str) -> dict | None:
+    """取上一次运行作为闭环基线：同一任务优先，没有就取全局最近一次。"""
+    with _open() as conn:
+        if schedule_id:
+            row = conn.execute(
+                "SELECT * FROM runs WHERE schedule_id = ? AND id != ? "
+                "ORDER BY rowid DESC LIMIT 1",
+                (schedule_id, exclude_run_id),
+            ).fetchone()
+            if row:
+                return _row_to_run(row)
+        row = conn.execute(
+            "SELECT * FROM runs WHERE id != ? ORDER BY rowid DESC LIMIT 1",
+            (exclude_run_id,),
+        ).fetchone()
+    return _row_to_run(row) if row else None
+
+
+def _row_to_run(row: sqlite3.Row) -> dict:
+    return {
+        "id": row["id"],
+        "created_at": row["created_at"],
+        "title": row["title"],
+        "status": row["status"],
+        "input": json.loads(row["input_json"]),
+        "result": json.loads(row["result_json"]),
+    }

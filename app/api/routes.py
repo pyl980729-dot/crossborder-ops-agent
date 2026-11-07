@@ -7,10 +7,12 @@ from pydantic import BaseModel, Field
 
 from app import db
 from app.core.contracts import STAGE_ORDER, contract_catalog
+from app.core.cron import validate as validate_cron
 from app.core.llm import provider_info
 from app.core.platforms import platform_list
 from app.demo import build_demo_payload
 from app.orchestrator import REGISTRY, run_single, run_stages
+from app.scheduler import get_scheduler
 
 router = APIRouter(prefix="/api")
 
@@ -95,3 +97,73 @@ def stages() -> dict:
             for key in STAGE_ORDER
         ]
     }
+
+
+# ---------------------------------------------------------------------------
+# 自动化：定时任务 + 闭环对比
+# ---------------------------------------------------------------------------
+
+class ScheduleRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=60)
+    cron: str = Field(default="0 9 * * *", description="分 时 日 月 周，例如 0 9 * * *")
+    payload: dict | None = Field(default=None, description="不传则每次用内置演示数据")
+    enabled: bool = True
+
+
+@router.get("/automation/status")
+def automation_status() -> dict:
+    sched = get_scheduler()
+    return {**sched.status(), "stats": db.stats()}
+
+
+@router.post("/automation/schedules")
+def create_schedule(req: ScheduleRequest) -> dict:
+    ok, message = validate_cron(req.cron)
+    if not ok:
+        raise HTTPException(status_code=400, detail=f"cron 非法：{message}")
+
+    sid = db.new_run_id()
+    payload = req.payload or {}
+    db.create_schedule(sid, req.name, req.cron, payload)
+    if not req.enabled:
+        db.set_schedule_enabled(sid, False)
+
+    return {"id": sid, "next_run_at": get_scheduler().status()}
+
+
+@router.patch("/automation/schedules/{sid}")
+def update_schedule(sid: str, enabled: bool) -> dict:
+    if not db.get_schedule(sid):
+        raise HTTPException(status_code=404, detail="任务不存在")
+    db.set_schedule_enabled(sid, enabled)
+    return {"id": sid, "enabled": enabled}
+
+
+@router.delete("/automation/schedules/{sid}")
+def remove_schedule(sid: str) -> dict:
+    if not db.get_schedule(sid):
+        raise HTTPException(status_code=404, detail="任务不存在")
+    db.delete_schedule(sid)
+    return {"id": sid, "deleted": True}
+
+
+@router.post("/automation/schedules/{sid}/run")
+def run_schedule_now(sid: str) -> dict:
+    """立即执行一次（不等 cron 到点），用于验证配置是否正确。"""
+    full = db.get_schedule(sid)
+    if not full:
+        raise HTTPException(status_code=404, detail="任务不存在")
+
+    from datetime import datetime
+
+    payload = full["payload"] or build_demo_payload()
+    result = run_stages(payload, schedule_id=sid, trigger="manual")
+    db.touch_schedule(sid, result["run_id"], datetime.now().isoformat(timespec="seconds"))
+    return result
+
+
+@router.post("/automation/tick")
+def automation_tick() -> dict:
+    """手动触发一次调度检查，不用等到下一个 tick 周期。"""
+    executed = get_scheduler().tick()
+    return {"executed": executed, "status": get_scheduler().status()}

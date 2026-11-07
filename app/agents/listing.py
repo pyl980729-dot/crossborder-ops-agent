@@ -8,9 +8,13 @@
 
 from __future__ import annotations
 
+import json
+import re
+
 from app.agents.base import StageAgent, action, fmt_pct, insight
 from app.core import metrics as M
 from app.core.contracts import StageResult
+from app.core.llm import provider_info, try_generate
 from app.core.platforms import get_platform
 
 # 详情页七段结构：少一段就少一个转化理由
@@ -41,7 +45,10 @@ class ListingAgent(StageAgent):
         variants = self._compose_titles(
             name, points, keywords, weighted, specs, audience, platform.title_max
         )
-        titles = []
+
+        # 先问模型要三版，再让脚本逐条验；验不过的直接丢，规则版兜底。
+        titles = self._llm_titles(name, points, keywords, specs, audience, platform)
+        llm_used = bool(titles)
         for variant in variants:
             lint = M.title_lint(
                 title=variant["text"],
@@ -49,13 +56,25 @@ class ListingAgent(StageAgent):
                 front_weight=platform.title_front_weight,
                 keywords=keywords,
             )
-            titles.append({**variant, "lint": lint})
+            titles.append({**variant, "lint": lint, "source": "rule"})
 
         best = max(titles, key=lambda t: (t["lint"]["passed"], t["lint"]["keyword_coverage"]))
 
         insights = []
         actions = []
         evidence = ["metrics.title_lint", f"platform:{platform.key}.title_max={platform.title_max}"]
+
+        if llm_used:
+            insights.append(
+                insight(
+                    f"标题由 {provider_info()['label']}（{provider_info()['model']}）生成后，"
+                    f"逐条通过字符数 / 关键词覆盖 / 堆砌三项脚本校验，"
+                    f"{sum(1 for t in titles if t['source'] == 'llm')} 条合规。"
+                    f"模型只负责写，能不能发由脚本判定。",
+                    "good",
+                    "listing.llm",
+                )
+            )
 
         # 语言守卫：中文卖点直接进外语标题是最常见的低级错误
         if _has_cjk(name) or any(_has_cjk(p) for p in points):
@@ -157,6 +176,7 @@ class ListingAgent(StageAgent):
                 "best": best,
                 "detail_sections": [{"title": t, "guide": g} for t, g in DETAIL_SECTIONS],
                 "keywords": keywords,
+                "llm": {"used": llm_used, **provider_info()},
                 "platform": {
                     "key": platform.key,
                     "name": platform.name,
@@ -169,6 +189,103 @@ class ListingAgent(StageAgent):
             evidence=evidence,
             next_stage="image",
         )
+
+    # ------------------------------------------------------------------
+    def _llm_titles(
+        self,
+        name: str,
+        points: list[str],
+        keywords: list[str],
+        specs: dict,
+        audience: str,
+        platform,
+    ) -> list[dict]:
+        """让模型写标题，但**只收通过脚本校验的**。
+
+        这是「生成与校验共用一套标准」的落地：
+        模型再自信，字符超限、关键词全丢、同一个词出现四次，一样不收。
+        """
+        if not keywords:
+            return []
+
+        point_text = "；".join(points[:3]) if points else "（无）"
+        spec_text = "，".join(f"{k}={v}" for k, v in list(specs.items())[:4]) or "（无）"
+        kw_text = "、".join(keywords[:6])
+
+        system = (
+            f"你是 {platform.name} 的资深 listing 文案，只为 {platform.language} 买家写标题。"
+            f"你写的标题必须像本地人写的，不是翻译腔。"
+        )
+        user = f"""为下面这个商品写 3 条标题备选。
+
+产品：{name}
+核心卖点：{point_text}
+规格：{spec_text}
+必须覆盖的关键词（按搜索量降序）：{kw_text}
+目标人群：{audience or "（未指定）"}
+
+硬约束：
+1. 只用 {platform.language}，禁止出现中文，禁止中英混写
+2. 每条不超过 {platform.title_max} 个字符（含空格），这是平台的硬限制
+3. 最重要的大词放在最前面，前 {platform.title_front_weight} 个字符权重最高
+4. 同一个实词最多出现 2 次，禁止堆砌同义词
+5. 三条要有明显差异：一条搜索词优先、一条卖点优先、一条场景/人群优先
+
+只输出 JSON 数组，三个字符串，不要任何解释：
+["标题一", "标题二", "标题三"]"""
+
+        raw = try_generate(system, user, max_tokens=500)
+        if not raw:
+            return []
+
+        out: list[dict] = []
+        for idx, text in enumerate(self._parse_candidates(raw)[:3]):
+            text = " ".join(text.split())
+            if _has_cjk(text):
+                continue  # 模型混了中文，直接丢
+            lint = M.title_lint(
+                title=text,
+                title_max=platform.title_max,
+                front_weight=platform.title_front_weight,
+                keywords=keywords,
+            )
+            if not lint["passed"]:
+                continue  # 超限或堆砌，不收
+            out.append(
+                {
+                    "variant": f"大模型方案 {idx + 1}",
+                    "text": text,
+                    "lint": lint,
+                    "source": "llm",
+                }
+            )
+        return out
+
+    @staticmethod
+    def _parse_candidates(raw: str) -> list[str]:
+        """尽力从模型输出里捞出标题：JSON 数组 → 数组片段 → 逐行。"""
+        try:
+            data = json.loads(raw)
+            if isinstance(data, list):
+                return [str(x).strip() for x in data if str(x).strip()]
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+        match = re.search(r"\[[\s\S]*\]", raw)
+        if match:
+            try:
+                data = json.loads(match.group(0))
+                if isinstance(data, list):
+                    return [str(x).strip() for x in data if str(x).strip()]
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+        lines: list[str] = []
+        for line in raw.splitlines():
+            cleaned = re.sub(r"^\s*[-*\d.)\]]+\s*", "", line).strip().strip('",')
+            if len(cleaned) > 10 and not cleaned.startswith("```"):
+                lines.append(cleaned)
+        return lines
 
     # ------------------------------------------------------------------
     @staticmethod
@@ -251,11 +368,13 @@ class ListingAgent(StageAgent):
             return text
 
         spec_phrase = " ".join(spec_bits[:2])
-        attr_phrase = " ".join(pool[:3])
 
-        v1 = fill(" ".join(x for x in [core, attr_phrase] if x), [spec_phrase] + pool, title_max)
+        # 注意：三个变体都以「core」为唯一起点，后续每个词都经过 fill 的堆砌检查。
+        # 早期版本用 " ".join(pool[:3]) 先拼好基础串，导致 core 里的词被重复带入，
+        # 生成出 patinete ×4 的标题，而堆砌检查发生在之后，抓不到。
+        v1 = fill(core, pool + ([spec_phrase] if spec_phrase else []), title_max)
         v2 = fill(" ".join(x for x in [core, point, spec_phrase] if x), pool, title_max)
-        v3 = fill(" ".join(x for x in [core, safe_audience, attr_phrase] if x), [spec_phrase] + pool, title_max)
+        v3 = fill(" ".join(x for x in [core, safe_audience] if x), pool + ([spec_phrase] if spec_phrase else []), title_max)
 
         seen: set[str] = set()
         out: list[dict] = []

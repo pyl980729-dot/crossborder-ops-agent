@@ -46,6 +46,13 @@
     loadHistory();
 
     $("#run-btn").addEventListener("click", runPipeline);
+    bindTabs();
+    $("#add-task").addEventListener("click", createTask);
+    document.querySelectorAll(".chip-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        $("#task-cron").value = btn.dataset.cron;
+      });
+    });
   }
 
   /* ---------------- 运行 ---------------- */
@@ -437,6 +444,250 @@
     } catch (_) {
       /* 历史加载失败不影响主流程 */
     }
+  }
+
+  /* ================= 视图切换 ================= */
+  function bindTabs() {
+    document.querySelectorAll("#tabs .tab").forEach((tab) => {
+      tab.addEventListener("click", () => switchView(tab.dataset.view));
+    });
+  }
+
+  function switchView(name) {
+    document.querySelectorAll("#tabs .tab").forEach((t) => {
+      t.classList.toggle("active", t.dataset.view === name);
+    });
+    $("#view-flow").hidden = name !== "flow";
+    $("#view-auto").hidden = name !== "auto";
+    if (name === "auto") loadAutomation();
+  }
+
+  /* ================= 自动化 ================= */
+  function fmtCountdown(seconds) {
+    if (seconds === null || seconds === undefined) return "—";
+    if (seconds <= 0) return "即将执行";
+    if (seconds < 60) return `${seconds} 秒后`;
+    const m = Math.floor(seconds / 60);
+    if (m < 60) return `${m} 分钟后`;
+    const h = Math.floor(m / 60);
+    const rm = m % 60;
+    if (h < 24) return `${h} 小时${rm ? ` ${rm} 分` : ""}后`;
+    return `${Math.floor(h / 24)} 天${h % 24 ? ` ${h % 24} 小时` : ""}后`;
+  }
+
+  function fmtTime(iso) {
+    if (!iso) return "—";
+    return iso.replace("T", " ").slice(5, 16);
+  }
+
+  async function loadAutomation() {
+    try {
+      const data = await api("/api/automation/status");
+      renderAutoStats(data);
+      renderTasks(data.tasks || []);
+      loadLatestCycle();
+    } catch (e) {
+      $("#task-list").innerHTML = `<p class="muted">加载失败：${esc(e.message)}</p>`;
+    }
+  }
+
+  function renderAutoStats(d) {
+    const running = d.state === "running";
+    const enabled = (d.tasks || []).filter((t) => t.enabled).length;
+    const next = (d.tasks || [])
+      .filter((t) => t.enabled && t.seconds_to_next !== null)
+      .sort((a, b) => a.seconds_to_next - b.seconds_to_next)[0];
+
+    const cards = [
+      {
+        k: "调度器",
+        v: running ? "运行中" : "已停止",
+        s: `每 ${d.tick_seconds} 秒检查一次`,
+        cls: running ? "accent" : "",
+      },
+      { k: "已配置任务", v: `${enabled} / ${(d.tasks || []).length}`, s: "启用 / 总数" },
+      { k: "下次执行", v: next ? fmtCountdown(next.seconds_to_next) : "—", s: next ? next.name : "没有启用中的任务" },
+      { k: "自动触发", v: d.stats?.scheduled_runs ?? 0, s: `累计运行 ${d.stats?.total_runs ?? 0} 次` },
+      { k: "服务器时间", v: fmtTime(d.server_time), s: d.last_error ? "有错误" : "正常" },
+    ];
+
+    $("#auto-stats").innerHTML = cards
+      .map(
+        (c) => `<div class="stat ${c.cls || ""}"><div class="k">${c.k}</div>
+        <div class="v" style="font-size:${String(c.v).length > 6 ? "18px" : "24px"}">${esc(c.v)}</div>
+        <div class="s">${esc(c.s)}</div></div>`
+      )
+      .join("");
+  }
+
+  function renderTasks(tasks) {
+    const box = $("#task-list");
+    if (!tasks.length) {
+      box.innerHTML = `<p class="muted">还没有定时任务。下面填个名字选个时间就能建。</p>`;
+      return;
+    }
+    box.innerHTML = tasks
+      .map(
+        (t) => `<div class="task-row ${t.enabled ? "" : "off"}">
+          <div class="task-main">
+            <div class="task-name">${esc(t.name)}
+              ${t.valid ? "" : `<span class="chip miss">cron 非法</span>`}
+            </div>
+            <div class="task-meta">
+              <code>${esc(t.cron)}</code> · ${esc(t.describe || "")}
+              · 上次 ${fmtTime(t.last_run_at)}
+              · 下次 ${
+                t.enabled && t.next_run_at
+                  ? `${fmtTime(t.next_run_at)}（${fmtCountdown(t.seconds_to_next)}）`
+                  : "—"
+              }
+            </div>
+          </div>
+          <div class="task-ops">
+            <button class="btn btn-sm" data-act="run" data-id="${esc(t.id)}">立即执行</button>
+            <button class="btn btn-sm" data-act="toggle" data-id="${esc(t.id)}" data-on="${t.enabled}">
+              ${t.enabled ? "暂停" : "启用"}
+            </button>
+            <button class="btn btn-sm danger" data-act="del" data-id="${esc(t.id)}">删除</button>
+          </div>
+        </div>`
+      )
+      .join("");
+
+    box.querySelectorAll("button[data-act]").forEach((btn) => {
+      btn.addEventListener("click", () => handleTaskAction(btn.dataset.act, btn.dataset.id, btn));
+    });
+  }
+
+  async function handleTaskAction(act, id, btn) {
+    try {
+      if (act === "run") {
+        btn.disabled = true;
+        btn.textContent = "执行中…";
+        const run = await api(`/api/automation/schedules/${id}/run`, { method: "POST" });
+        state.run = run;
+        state.active = run.stages[0]?.stage;
+        renderAll();
+        loadAutomation();
+        return;
+      }
+      if (act === "toggle") {
+        const enable = btn.dataset.on !== "true";
+        await api(`/api/automation/schedules/${id}?enabled=${enable}`, { method: "PATCH" });
+      }
+      if (act === "del") {
+        if (!confirm("删除这个定时任务？历史运行记录会保留。")) return;
+        await api(`/api/automation/schedules/${id}`, { method: "DELETE" });
+      }
+      loadAutomation();
+    } catch (e) {
+      alert(`操作失败：${e.message}`);
+      btn.disabled = false;
+    }
+  }
+
+  async function createTask() {
+    const name = $("#task-name").value.trim();
+    const cron = $("#task-cron").value.trim();
+    if (!name) return alert("请填写任务名称");
+    if (!cron) return alert("请填写 cron 表达式");
+    try {
+      await api("/api/automation/schedules", {
+        method: "POST",
+        body: JSON.stringify({ name, cron }),
+      });
+      $("#task-name").value = "";
+      loadAutomation();
+    } catch (e) {
+      alert(`创建失败：${e.message}`);
+    }
+  }
+
+  /* ---- 闭环对比 ---- */
+  async function loadLatestCycle() {
+    const box = $("#cycle-panel");
+    try {
+      const list = await api("/api/runs?limit=1");
+      if (!list.runs?.length) {
+        box.innerHTML = `<p class="muted">还没有运行记录。跑一次全链路就能看到对比。</p>`;
+        return;
+      }
+      const detail = await api(`/api/runs/${list.runs[0].id}`);
+      const cycle = detail.result?.cycle;
+      if (!cycle) {
+        box.innerHTML = `<p class="muted">这次运行没有闭环数据。</p>`;
+        return;
+      }
+      renderCycle(cycle, detail);
+    } catch (e) {
+      box.innerHTML = `<p class="muted">加载失败：${esc(e.message)}</p>`;
+    }
+  }
+
+  function renderCycle(cycle, detail) {
+    const tone = { 改善: "good", 恶化: "bad", 持平: "flat", 首次运行: "first" }[cycle.verdict] || "flat";
+    // 箭头只表数值方向（↑升 ↓降），颜色只表好坏（绿好红坏）。
+    // 混在一起会读反：P0 组从 0 涨到 2 是「↑ +2 红色」，不是「↓」。
+    const arrowOf = (r) => (r.delta > 0 ? "↑" : r.delta < 0 ? "↓" : "=");
+    const cls = { better: "better", worse: "worse", same: "same" };
+
+    const rows = (cycle.rows || [])
+      .map(
+        (r) => `<div class="cyc-row">
+          <span class="cyc-label">${esc(r.label)}</span>
+          <span class="cyc-val">${esc(r.prev)}</span>
+          <span class="cyc-arrow">→</span>
+          <span class="cyc-val strong">${esc(r.curr)}</span>
+          <span class="cyc-trend ${cls[r.trend]}">${arrowOf(r)} ${r.delta > 0 ? "+" : ""}${r.delta}</span>
+        </div>`
+      )
+      .join("");
+
+    const pending = cycle.pending || {};
+    const staleAll = pending.stale || [];
+    const stale = staleAll
+      .slice(0, 4)
+      .map(
+        (a) => `<div class="pend-item stale">
+          <span class="pri ${a.priority}">${a.priority}</span>
+          <div><b>${esc(a.target)}</b><div class="pend-sub">${esc(a.change)}</div></div>
+        </div>`
+      )
+      .join("");
+
+    const resolved = (pending.resolved || [])
+      .map(
+        (a) => `<div class="pend-item done">
+          <span class="done-mark">✓</span>
+          <div><b>${esc(a.target)}</b><div class="pend-sub">已消除</div></div>
+        </div>`
+      )
+      .join("");
+
+    $("#cycle-panel").innerHTML = `
+      <div class="verdict ${tone}">
+        <div class="verdict-label">${esc(cycle.verdict)}</div>
+        <div class="verdict-reason">${esc(cycle.reason || "")}</div>
+        ${
+          cycle.baseline_at
+            ? `<div class="verdict-base">对比基线：${fmtTime(cycle.baseline_at)}（${esc(cycle.baseline_run_id || "")}）</div>`
+            : ""
+        }
+      </div>
+      ${rows ? `<div class="cyc-table">${rows}</div>` : ""}
+      ${
+        stale
+          ? `<div class="block-title" style="margin-top:16px">上次的 P0 仍未消除（${staleAll.length}）</div>
+             <div class="pend-list">${stale}</div>
+             ${staleAll.length > 4 ? `<p class="preview-note" style="margin-top:8px">另有 ${staleAll.length - 4} 条，去「工作流」页看完整清单。</p>` : ""}`
+          : ""
+      }
+      ${resolved ? `<div class="block-title" style="margin-top:14px">已消除</div><div class="pend-list">${resolved}</div>` : ""}
+      ${
+        pending.new?.length
+          ? `<p class="preview-note" style="margin-top:12px">另有 ${pending.new.length} 条新增 P0，去「工作流」页看完整动作清单。</p>`
+          : ""
+      }`;
   }
 
   boot();
