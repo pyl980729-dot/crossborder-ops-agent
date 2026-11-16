@@ -24,6 +24,7 @@ from app import db
 
 @dataclass(frozen=True)
 class ThresholdDef:
+    """一个可调阈值的定义：默认值、合法区间、展示格式与业务说明。"""
     key: str
     label: str
     group: str
@@ -34,6 +35,7 @@ class ThresholdDef:
     desc: str
 
     def fmt(self, value: float) -> str:
+        """按 kind 格式化成展示文本；index 类不能显示成百分比，会被读成比例。"""
         if self.kind == "ratio":
             return f"{value * 100:.1f}%"
         if self.kind == "index":
@@ -178,25 +180,31 @@ class Config:
     store_id: str = "default"
 
     def __init__(self, values: dict[str, float], sources: dict[str, str], platform: str = ""):
+        """持有一次运行内生效的阈值集合与每个值的来源标注。"""
         self._values = values
         self._sources = sources
         self.platform = platform
 
     def get(self, key: str) -> float:
+        """取阈值；键未定义直接报错，避免拼错键静默取到 0。"""
         if key not in self._values:
             raise KeyError(f"未定义的阈值: {key}")
         return self._values[key]
 
     def get_int(self, key: str) -> int:
+        """取整数阈值（计数类）。"""
         return int(self.get(key))
 
     def source_of(self, key: str) -> str:
+        """该值来自哪一层：request / override / platform / default。"""
         return self._sources.get(key, "default")
 
     def source_label(self, key: str) -> str:
+        """来源的中文标签，报告里给用户看。"""
         return SOURCE_LABEL.get(self.source_of(key), self.source_of(key))
 
     def describe(self, key: str) -> str:
+        """该阈值的展示文本（带单位）。"""
         return THRESHOLDS[key].fmt(self.get(key))
 
     def as_list(self) -> list[dict]:
@@ -224,6 +232,7 @@ class Config:
         return out
 
     def flat(self) -> dict[str, float]:
+        """导出扁平字典，便于整体回传或落库。"""
         return dict(self._values)
 
 
@@ -311,5 +320,6 @@ def update_overrides(patch: dict, store_id: str = "default") -> dict:
 
 
 def reset_all(store_id: str = "default") -> None:
+    """删除某店铺的全部覆盖，恢复默认与平台预设。"""
     for key in THRESHOLDS:
         db.delete_setting(key, store_id)

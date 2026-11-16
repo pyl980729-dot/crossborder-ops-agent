@@ -14,9 +14,11 @@ from app.core.platforms import get_platform
 
 
 class MarketAgent(StageAgent):
+    """01 市场调研：先算容量 / 集中度 / 价格带供需，再收敛成一个进入结论。"""
     key = "market"
 
     def _run(self, payload: dict) -> StageResult:
+        """算市场指标 → 出解读与动作 → 用四项信号（集中度/机会/口碑/容量）给进入评分。"""
         products = payload["products"]
         category = payload["category"]
         platform = get_platform(payload.get("platform"))

@@ -24,9 +24,11 @@ CHARS_PER_SEC_ZH = 4.5
 
 
 class VideoAgent(StageAgent):
+    """05 短视频脚本：固定四段结构，口播时长由脚本按语种语速测算。"""
     key = "video"
 
     def _run(self, payload: dict) -> StageResult:
+        """生成分镜 → 可选让模型改写口播 → 测算时长；塞不进目标时长就整体回落规则文案。"""
         platform = get_platform(payload.get("platform"))
         cfg = config.load_config(payload.get("platform"), payload.get("thresholds"))
         chars_per_sec = cfg.get("video.chars_per_sec_zh")
@@ -239,6 +241,7 @@ class VideoAgent(StageAgent):
 
     @staticmethod
     def _parse_json_object(raw: str) -> dict:
+        """从模型输出里尽力捞出 JSON 对象，失败返回空 dict（不抛错）。"""
         try:
             data = json.loads(raw)
             if isinstance(data, dict):
@@ -259,6 +262,7 @@ class VideoAgent(StageAgent):
     def _build_storyboard(name: str, main_point: str, audience: str, duration: int) -> list[dict]:
         # 四段时长按比例分配，再按目标时长缩放。
         # 文案刻意写短：25 秒视频容不下长句，产品名交给画面，口播不念完整型号。
+        """四段按比例分配时长再缩放到目标时长，取整误差补到最后一段，保证总长精确。"""
         base = [
             ("Hook", 3, f"还在为续航焦虑？{main_point}。",
              f"{name} 产品特写 + 大字幕「{main_point}」", "抓住 3 秒注意力"),

@@ -24,6 +24,7 @@ LINE = "─" * 70
 
 
 def main() -> int:
+    """抹掉分类列让系统重分，与人工标注逐条比对，算覆盖率与准确率。"""
     use_llm = "--llm" in sys.argv
     reviews = build_demo_payload()["reviews"]
 

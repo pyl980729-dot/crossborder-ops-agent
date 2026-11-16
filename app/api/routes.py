@@ -26,27 +26,32 @@ log = get_logger("api")
 
 
 class RunRequest(BaseModel):
+    """跑一次全链路的请求体：payload 为空时用内置演示数据。"""
     payload: dict | None = Field(default=None, description="不传则使用内置演示数据")
     stages: list[str] | None = Field(default=None, description="只跑部分 Stage")
 
 
 @router.get("/health")
 def health() -> dict:
+    """健康检查：服务状态、LLM 模式与 Stage 数量（免登录）。"""
     return {"status": "ok", "llm": provider_info(), "stages": len(STAGE_ORDER)}
 
 
 @router.get("/contracts")
 def contracts() -> dict:
+    """7 个 Stage 的输入契约，供前端展示「这个环节需要什么数据」。"""
     return {"contracts": contract_catalog(), "order": STAGE_ORDER}
 
 
 @router.get("/platforms")
 def platforms() -> dict:
+    """平台规则清单（标题上限、费率、语言），前端做表单联动用。"""
     return {"platforms": platform_list()}
 
 
 @router.get("/demo")
 def demo() -> dict:
+    """内置演示 payload 与数量概览；大字段全量返回，preview 只给标量。"""
     payload = build_demo_payload()
     # 商品列表太长，前端默认不展示全量，但保留完整数据供运行
     preview = {k: v for k, v in payload.items() if k not in ("products", "reviews", "campaigns")}
@@ -63,6 +68,7 @@ def demo() -> dict:
 
 @router.post("/runs")
 def create_run(req: RunRequest, p: Principal = Depends(require("run"))) -> dict:
+    """执行全链路；不传 platform 时取当前店铺的平台，避免阈值套错预设。"""
     payload = req.payload or build_demo_payload()
     if not isinstance(payload, dict):
         raise HTTPException(status_code=400, detail="payload 必须是对象")
@@ -78,6 +84,7 @@ def create_run(req: RunRequest, p: Principal = Depends(require("run"))) -> dict:
 
 @router.get("/runs")
 def list_runs(limit: int = 20, p: Principal = Depends(get_principal)) -> dict:
+    """当前店铺的运行历史 + 统计，只查本店。"""
     return {
         "runs": db.list_runs(limit=limit, store_id=p.store_id),
         "stats": db.stats(p.store_id),
@@ -86,6 +93,7 @@ def list_runs(limit: int = 20, p: Principal = Depends(get_principal)) -> dict:
 
 @router.get("/runs/{run_id}")
 def get_run(run_id: str, p: Principal = Depends(get_principal)) -> dict:
+    """读取单次运行详情；非 owner 读不到别的店铺的记录。"""
     run = db.get_run(run_id)
     if not run:
         raise HTTPException(status_code=404, detail="运行记录不存在")
@@ -105,6 +113,7 @@ def run_stage(stage: str, payload: dict, p: Principal = Depends(require("run")))
 
 @router.get("/stages")
 def stages() -> dict:
+    """Stage 顺序与各自必填字段，前端画流水线用。"""
     return {
         "stages": [
             {
@@ -122,6 +131,7 @@ def stages() -> dict:
 # ---------------------------------------------------------------------------
 
 class ScheduleRequest(BaseModel):
+    """新建定时任务的请求体：cron 五字段 + 可选 payload。"""
     name: str = Field(min_length=1, max_length=60)
     cron: str = Field(default="0 9 * * *", description="分 时 日 月 周，例如 0 9 * * *")
     payload: dict | None = Field(default=None, description="不传则每次用内置演示数据")
@@ -130,12 +140,14 @@ class ScheduleRequest(BaseModel):
 
 @router.get("/automation/status")
 def automation_status(p: Principal = Depends(get_principal)) -> dict:
+    """调度器状态、任务列表、下次执行倒计时，按当前店铺过滤。"""
     sched = get_scheduler()
     return {**sched.status(store_id=p.store_id), "stats": db.stats(p.store_id)}
 
 
 @router.post("/automation/schedules")
 def create_schedule(req: ScheduleRequest, p: Principal = Depends(require("manage_schedule"))) -> dict:
+    """校验 cron 后建任务；enabled=False 时建完立即暂停。"""
     ok, message = validate_cron(req.cron)
     if not ok:
         raise HTTPException(status_code=400, detail=f"cron 非法：{message}")
@@ -152,6 +164,7 @@ def create_schedule(req: ScheduleRequest, p: Principal = Depends(require("manage
 @router.patch("/automation/schedules/{sid}")
 def update_schedule(sid: str, enabled: bool,
                     p: Principal = Depends(require("manage_schedule"))) -> dict:
+    """启用 / 暂停任务，不改 cron 与 payload。"""
     if not db.get_schedule(sid):
         raise HTTPException(status_code=404, detail="任务不存在")
     db.set_schedule_enabled(sid, enabled)
@@ -160,6 +173,7 @@ def update_schedule(sid: str, enabled: bool,
 
 @router.delete("/automation/schedules/{sid}")
 def remove_schedule(sid: str, p: Principal = Depends(require("manage_schedule"))) -> dict:
+    """删除任务，不影响已产生的运行记录。"""
     if not db.get_schedule(sid):
         raise HTTPException(status_code=404, detail="任务不存在")
     db.delete_schedule(sid)
@@ -239,11 +253,13 @@ async def upload_dataset(
 
 @router.get("/datasets")
 def get_datasets(kind: str | None = None, p: Principal = Depends(get_principal)) -> dict:
+    """当前店铺已上传的数据集列表，可按 kind 过滤。"""
     return {"datasets": db.list_datasets(kind, store_id=p.store_id)}
 
 
 @router.delete("/datasets/{did}")
 def remove_dataset(did: str, p: Principal = Depends(require("delete_data"))) -> dict:
+    """删除数据集记录及落盘文件；只能删本店铺的。"""
     if not db.delete_dataset(did, store_id=p.store_id):
         raise HTTPException(status_code=404, detail="数据集不存在")
     log.info("dataset deleted id=%s", did)
@@ -251,6 +267,7 @@ def remove_dataset(did: str, p: Principal = Depends(require("delete_data"))) -> 
 
 
 class RunFromDatasets(BaseModel):
+    """用已上传数据集跑一次：三个 id 都可选，缺哪份就不塞哪份。"""
     product_dataset_id: str | None = None
     ad_dataset_id: str | None = None
     review_dataset_id: str | None = None
@@ -314,6 +331,7 @@ def get_config(platform: str | None = None, p: Principal = Depends(get_principal
 
 
 class ConfigUpdate(BaseModel):
+    """阈值覆盖补丁：值为 null 表示恢复该项默认。"""
     values: dict
 
 
@@ -354,6 +372,7 @@ def update_config(req: ConfigUpdate, p: Principal = Depends(get_principal)) -> d
 
 @router.post("/config/reset")
 def reset_config(p: Principal = Depends(require("config_core"))) -> dict:
+    """清空本店铺全部阈值覆盖，回到平台预设 / 系统默认。"""
     app_config.reset_all(p.store_id)
     log.info("config reset by %s", p.username)
     return {"reset": True}
@@ -364,18 +383,21 @@ def reset_config(p: Principal = Depends(require("config_core"))) -> dict:
 # ---------------------------------------------------------------------------
 
 class SetupRequest(BaseModel):
+    """首次初始化的请求体：用户名 + 密码 + 显示名。"""
     username: str = Field(min_length=2, max_length=32)
     password: str = Field(min_length=6, max_length=64)
     display_name: str = Field(default="", max_length=32)
 
 
 class LoginRequest(BaseModel):
+    """登录请求体：可指定要进入的店铺。"""
     username: str
     password: str
     store_id: str | None = None
 
 
 class NewUserRequest(BaseModel):
+    """新增成员的请求体：用户名、密码、角色。"""
     username: str = Field(min_length=2, max_length=32)
     password: str = Field(min_length=6, max_length=64)
     display_name: str = Field(default="", max_length=32)
@@ -383,6 +405,7 @@ class NewUserRequest(BaseModel):
 
 
 def _set_session_cookie(response: Response, token: str) -> None:
+    """写 HttpOnly 会话 Cookie：SameSite=Lax，有效期 7 天。"""
     response.set_cookie(
         "ecom_session", token,
         httponly=True, samesite="lax", max_age=auth.SESSION_DAYS * 24 * 3600,
@@ -434,6 +457,7 @@ def auth_setup(req: SetupRequest, response: Response) -> dict:
 
 @router.post("/auth/login")
 def auth_login(req: LoginRequest, response: Response) -> dict:
+    """校验密码 → 确认店铺权限 → 建会话并写 Cookie。"""
     user = db.get_user_by_username(req.username.strip())
     if not user or not auth.verify_password(req.password, user["password_hash"]):
         log.warning("登录失败: username=%s", req.username)
@@ -463,6 +487,7 @@ def auth_login(req: LoginRequest, response: Response) -> dict:
 
 @router.post("/auth/logout")
 def auth_logout(response: Response, token: str | None = None) -> dict:
+    """删除服务端会话并清 Cookie；token 缺失时也照常清 Cookie。"""
     if token:
         db.delete_session(token)
     response.delete_cookie("ecom_session")
@@ -471,6 +496,7 @@ def auth_logout(response: Response, token: str | None = None) -> dict:
 
 @router.get("/auth/me")
 def auth_me(p: Principal = Depends(get_principal)) -> dict:
+    """当前身份、权限清单与可切换店铺；未登录时 need_login=true。"""
     stores = db.list_user_stores(p.user_id) if p.user_id and p.user_id not in ("local", "service") else db.list_stores()
     return {
         **p.as_dict(),
@@ -506,6 +532,7 @@ def switch_store(store_id: str, request: None = None,
 
 @router.get("/users")
 def list_users(p: Principal = Depends(require("manage_members"))) -> dict:
+    """本店铺成员列表；owner 额外能看到全部账号。"""
     return {
         "users": db.list_store_members(p.store_id),
         "all": db.list_users() if p.is_admin else [],
@@ -518,6 +545,7 @@ def list_users(p: Principal = Depends(require("manage_members"))) -> dict:
 
 @router.post("/users")
 def create_user(req: NewUserRequest, p: Principal = Depends(require("manage_members"))) -> dict:
+    """新增成员并绑定到当前店铺；用户名重复直接拒绝。"""
     if req.role not in auth.ROLES:
         raise HTTPException(status_code=400, detail=f"角色必须是 {auth.ROLES}")
     if db.get_user_by_username(req.username.strip()):
@@ -536,6 +564,7 @@ def create_user(req: NewUserRequest, p: Principal = Depends(require("manage_memb
 @router.patch("/users/{uid}")
 def update_user(uid: str, role: str | None = None, display_name: str | None = None,
                 p: Principal = Depends(require("manage_members"))) -> dict:
+    """改角色或显示名；不允许把最后一个负责人降级。"""
     target = db.get_user(uid)
     if not target:
         raise HTTPException(status_code=404, detail="用户不存在")
@@ -553,6 +582,7 @@ def update_user(uid: str, role: str | None = None, display_name: str | None = No
 
 @router.delete("/users/{uid}")
 def delete_user(uid: str, p: Principal = Depends(require("manage_members"))) -> dict:
+    """删除成员及其会话与店铺关系；不能删自己，也不能删掉最后一个负责人。"""
     target = db.get_user(uid)
     if not target:
         raise HTTPException(status_code=404, detail="用户不存在")
@@ -574,6 +604,7 @@ def delete_user(uid: str, p: Principal = Depends(require("manage_members"))) -> 
 
 @router.get("/stores")
 def list_stores(p: Principal = Depends(get_principal)) -> dict:
+    """登录用户只看自己所属店铺；服务令牌 / 开放模式看全部。"""
     stores = db.list_user_stores(p.user_id) if p.via == "session" else db.list_stores()
     return {"stores": stores, "current": p.store_id}
 
@@ -581,6 +612,7 @@ def list_stores(p: Principal = Depends(get_principal)) -> dict:
 @router.post("/stores")
 def create_store(name: str, platform: str = "shopee_br",
                  p: Principal = Depends(require("manage_members"))) -> dict:
+    """新建店铺并绑定当前用户；平台决定阈值预设与日期习惯。"""
     if not name.strip():
         raise HTTPException(status_code=400, detail="店铺名不能为空")
     sid = db.new_run_id()

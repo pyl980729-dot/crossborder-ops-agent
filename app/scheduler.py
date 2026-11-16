@@ -20,7 +20,9 @@ from app.core.cron import Cron, CronError
 
 
 class Scheduler:
+    """后台线程调度器：每 30 秒检查一次到点任务，按单进程设计。"""
     def __init__(self, tick_seconds: int = 30):
+        """记录 tick 间隔与运行状态；线程在 start 时才创建。"""
         self.tick_seconds = tick_seconds
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
@@ -32,6 +34,7 @@ class Scheduler:
 
     # ---- 生命周期 ----
     def start(self) -> None:
+        """启动后台线程；已在运行则直接返回。"""
         if self._thread and self._thread.is_alive():
             return
         self._stop.clear()
@@ -40,10 +43,12 @@ class Scheduler:
         self.state = "running"
 
     def stop(self) -> None:
+        """置停止标并改状态，线程在下一轮循环退出。"""
         self._stop.set()
         self.state = "stopped"
 
     def _loop(self) -> None:
+        """循环 tick；单次异常只记录不退出，避免调度器静默死掉。"""
         while not self._stop.is_set():
             try:
                 self.tick()
@@ -100,6 +105,7 @@ class Scheduler:
         return dt
 
     def _execute(self, sched: dict, now: datetime) -> dict:
+        """取任务 payload 跑全链路，推进 last_run_at 并返回本次执行记录。"""
         from app.orchestrator import run_stages
 
         full = db.get_schedule(sched["id"])
@@ -184,6 +190,7 @@ _scheduler = Scheduler()
 
 
 def get_scheduler() -> Scheduler:
+    """取进程内的调度器单例。"""
     return _scheduler
 
 

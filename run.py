@@ -11,6 +11,7 @@ import uvicorn
 
 
 def main() -> None:
+    """解析 host / port / reload 参数并启动 uvicorn。"""
     parser = argparse.ArgumentParser(description="CrossBorder Ops Agent")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8000)

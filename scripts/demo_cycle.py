@@ -69,6 +69,7 @@ def round3() -> dict:
 
 
 def show(title: str, result: dict) -> None:
+    """打印一轮演示的闭环判定、指标对比与遗留 / 已消除的 P0。"""
     print(f"\n{LINE}\n{title}\n{LINE}")
     s = result["summary"]
     print(f"状态 {result['status']}　动作 {s['action_total']} 条（P0 {s['p0_total']}）　回流 {s['backflow_count']} 条")

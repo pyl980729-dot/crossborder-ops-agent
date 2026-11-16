@@ -24,6 +24,7 @@ from app.core import auth  # noqa: E402
 
 
 def list_users() -> None:
+    """打印所有账号的显示名与角色。"""
     users = db.list_users()
     if not users:
         print("当前没有账号（处于开放模式，打开页面可直接使用）。")
@@ -37,6 +38,7 @@ def list_users() -> None:
 
 
 def reset(username: str, password: str) -> None:
+    """重置指定账号的密码；账号不存在或密码过短则退出。"""
     user = db.get_user_by_username(username)
     if not user:
         print(f"账号不存在：{username}")
@@ -49,6 +51,7 @@ def reset(username: str, password: str) -> None:
 
 
 def clear_all() -> None:
+    """清空用户 / 会话 / 成员关系，让系统回到开放模式。"""
     import sqlite3
 
     conn = sqlite3.connect(db.DB_PATH)
@@ -60,6 +63,7 @@ def clear_all() -> None:
 
 
 def init_admin(password: str) -> None:
+    """清空后重建一个 owner 账号（admin），并绑定第一个店铺。"""
     if len(password) < 6:
         print("密码至少 6 位")
         raise SystemExit(1)

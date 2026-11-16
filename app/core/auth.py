@@ -66,10 +66,12 @@ PBKDF2_ROUNDS = 100_000
 
 
 def can(role: str, permission: str) -> bool:
+    """判断角色是否拥有某权限。"""
     return role in PERMISSIONS.get(permission, set())
 
 
 def permission_for_config_group(group: str) -> str:
+    """阈值分组 → 所需权限：诊断类归 config_core，文案类归 config_content。"""
     return CONFIG_GROUP_PERMISSION.get(group, "config_core")
 
 
@@ -85,6 +87,7 @@ def hash_password(password: str, salt: str | None = None) -> str:
 
 
 def verify_password(password: str, stored: str) -> bool:
+    """用存储里的盐重算 PBKDF2，并做恒定时间比较。"""
     try:
         salt, expected = stored.split("$", 1)
     except ValueError:
@@ -96,14 +99,17 @@ def verify_password(password: str, stored: str) -> bool:
 
 
 def new_token() -> str:
+    """生成会话 token。"""
     return secrets.token_urlsafe(32)
 
 
 def session_expiry(days: int = SESSION_DAYS) -> str:
+    """会话过期时间（默认 7 天），ISO 字符串。"""
     return (datetime.now() + timedelta(days=days)).isoformat(timespec="seconds")
 
 
 def session_valid(expires_at: str) -> bool:
+    """判断过期时间是否还在未来；解析失败按过期处理。"""
     try:
         return datetime.fromisoformat(expires_at) > datetime.now()
     except (TypeError, ValueError):
@@ -129,16 +135,20 @@ class Principal:
 
     @property
     def is_admin(self) -> bool:
+        """是否负责人角色。"""
         return self.role == "owner"
 
     @property
     def role_label(self) -> str:
+        """角色的中文名。"""
         return ROLE_LABELS.get(self.role, self.role)
 
     def can(self, permission: str) -> bool:
+        """当前身份是否拥有某权限。"""
         return can(self.role, permission)
 
     def as_dict(self) -> dict:
+        """给前端的身份快照，含权限清单。"""
         return {
             "user_id": self.user_id,
             "username": self.username,

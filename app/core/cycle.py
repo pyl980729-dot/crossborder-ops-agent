@@ -56,6 +56,7 @@ def _action_key(a: dict) -> str:
 
 
 def collect_actions(result: dict, priority: str = "P0") -> dict[str, dict]:
+    """按优先级收集动作，用「优先级 + 对象」去重，作为追踪指纹。"""
     out: dict[str, dict] = {}
     for stage in result.get("stages", []):
         for a in stage.get("actions", []):
@@ -157,4 +158,5 @@ def baseline_payload(prev_run: dict) -> dict:
 
 
 def current_payload(result: dict) -> dict:
+    """把本次运行整理成 compare 需要的形状。"""
     return {"snapshot": snapshot(result), "result": result, "run_id": result.get("run_id")}

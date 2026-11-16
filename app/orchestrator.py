@@ -36,6 +36,7 @@ REGISTRY: dict[str, StageAgent] = {
 
 
 def get_agent(stage: str) -> StageAgent:
+    """按 key 取 Agent 实例；未知 Stage 抛 KeyError，由接口层转 400。"""
     if stage not in REGISTRY:
         raise KeyError(f"未知 Stage: {stage}")
     return REGISTRY[stage]
@@ -207,6 +208,7 @@ def run_single(stage: str, payload: dict) -> dict:
 
 
 def _llm_mode() -> str:
+    """当前 LLM 模式（offline / online），随运行记录一起落库。"""
     from app.core.llm import provider_info
 
     return provider_info()["mode"]

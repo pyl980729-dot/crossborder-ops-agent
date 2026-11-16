@@ -20,12 +20,14 @@ from app.core.auth import Principal
 
 
 def _first_store_id() -> str:
+    """取第一个店铺作为默认上下文；一个店铺都没有时回落到 DEFAULT_STORE。"""
     stores = db.list_stores()
     return stores[0]["id"] if stores else db.DEFAULT_STORE
 
 
 def resolve_principal(request: Request) -> Principal:
     # ---- 1. 会话 ----
+    """按「会话 → 服务令牌 → 开放模式」顺序解析身份，都不成立则返回匿名。"""
     token = request.cookies.get("ecom_session") or request.headers.get("X-Session-Token", "")
     if token:
         sess = db.get_session(token)

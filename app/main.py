@@ -71,6 +71,7 @@ def _login_required(request: Request, principal) -> bool:
 
 @app.middleware("http")
 async def request_pipeline(request: Request, call_next):
+    """每个请求：分配 request id、解析身份、未登录拦截、兜底异常、记录耗时。"""
     rid = uuid4().hex[:8]
     request.state.request_id = rid
     started = time.perf_counter()
@@ -104,6 +105,7 @@ async def request_pipeline(request: Request, call_next):
 
 @app.on_event("startup")
 def _startup() -> None:
+    """初始化数据库、启动调度器，并打印当前访问模式。"""
     db.init_db()
     autostart()
     users = db.count_users()
@@ -113,12 +115,14 @@ def _startup() -> None:
 
 @app.on_event("shutdown")
 def _shutdown() -> None:
+    """停掉调度器。"""
     get_scheduler().stop()
     log.info("服务停止")
 
 
 @app.get("/")
 def index() -> FileResponse:
+    """返回单页前端。"""
     return FileResponse(str(STATIC_DIR / "index.html"))
 
 

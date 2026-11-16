@@ -25,6 +25,7 @@ SCENE_WORDS = ["Patinete Elétrico", "Scooter Elétrico Adulto", "Patinete 500W"
 
 
 def weighted_brand() -> str:
+    """按预设权重抽品牌，保证头部品牌销量占比稳定。"""
     r = random.random()
     acc = 0.0
     for name, w in BRANDS:
@@ -35,6 +36,7 @@ def weighted_brand() -> str:
 
 
 def gen_products(n: int = 42) -> list[dict]:
+    """生成类目 TOP 商品；价格分三层，刻意做出蓝海价格带与高集中度。"""
     rows = []
     for i in range(n):
         # 价格分三层：低价红海、中价蓝海、高价小众
@@ -142,6 +144,7 @@ def gen_reviews(total: int = 450) -> list[dict]:
 
 
 def write_csv(path: Path, rows: list[dict]) -> None:
+    """写 CSV 并打印行数。"""
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", newline="", encoding="utf-8") as fh:
         writer = csv.DictWriter(fh, fieldnames=list(rows[0].keys()))

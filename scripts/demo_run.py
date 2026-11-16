@@ -23,6 +23,7 @@ SEED = ROOT / "data" / "seed"
 
 
 def print_report(result: dict) -> None:
+    """按 Stage 打印状态、头条、前三条解读与动作，末尾附回流。"""
     line = "=" * 72
     print(f"\n{line}\n运行 {result['run_id']} · {result['title']}\n{line}")
     print(f"状态 {result['status']}　耗时 {result['elapsed_ms']}ms　"

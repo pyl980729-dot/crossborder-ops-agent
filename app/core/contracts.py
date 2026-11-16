@@ -72,6 +72,7 @@ class ContractError(ValueError):
     """输入契约不满足。"""
 
     def __init__(self, stage: str, missing: list[str], hint: str = ""):
+        """带上 stage 与缺失字段，便于上层转成 [INPUT_MISSING] 提示。"""
         self.stage = stage
         self.missing = missing
         self.hint = hint

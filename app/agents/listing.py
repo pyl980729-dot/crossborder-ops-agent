@@ -30,9 +30,11 @@ DETAIL_SECTIONS = [
 
 
 class ListingAgent(StageAgent):
+    """03 Listing 文案：生成三个标题变体，再用脚本校验字符数、覆盖与堆砌。"""
     key = "listing"
 
     def _run(self, payload: dict) -> StageResult:
+        """组装规则变体 + 模型变体，逐条过 title_lint，挑最优并给出详情页七段结构。"""
         platform = get_platform(payload.get("platform"))
         cfg = config.load_config(payload.get("platform"), payload.get("thresholds"))
         stuffing_limit = cfg.get_int("listing.stuffing_limit")
@@ -397,4 +399,5 @@ class ListingAgent(StageAgent):
 
 
 def _has_cjk(text: str) -> bool:
+    """判断文本里是否含中日韩字符 —— 中文卖点不能直接拼进外语标题。"""
     return any("\u4e00" <= ch <= "\u9fff" for ch in str(text))

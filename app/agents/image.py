@@ -80,9 +80,11 @@ NINE_GRID = [
 
 
 class ImageAgent(StageAgent):
+    """04 主图与详情图：把九宫格拆成九个转化理由，并逐格给出 Prompt 与合规要求。"""
     key = "image"
 
     def _run(self, payload: dict) -> StageResult:
+        """按固定九宫格生成规划 / Prompt / 合规要求，再用 metrics 校验完整性。"""
         platform = get_platform(payload.get("platform"))
         name = str(payload["product_name"]).strip()
         points = [str(p).strip() for p in payload["selling_points"] if str(p).strip()]
@@ -183,6 +185,7 @@ class ImageAgent(StageAgent):
 
     @staticmethod
     def _compliance_note(slot: str, platform) -> str:
+        """返回某一格图在指定平台下的硬性合规要求。"""
         notes = {
             "主图": f"主体 ≥85%，背景 {platform.image_bg}，≥{platform.image_min_px}px，禁止文字/水印/多品同图",
             "卖点图": "卖点必须有参数或画面可验证，禁止绝对化用语",
@@ -198,4 +201,5 @@ class ImageAgent(StageAgent):
 
 
 def _has_cjk(text: str) -> bool:
+    """判断文本里是否含中日韩字符 —— 混语言内容不能进外语标题或出图 Prompt。"""
     return any("\u4e00" <= ch <= "\u9fff" for ch in str(text))

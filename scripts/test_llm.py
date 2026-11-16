@@ -25,6 +25,7 @@ from app.core.llm import (  # noqa: E402
 
 
 def mask(secret: str) -> str:
+    """把 API Key 打码，只露前 6 位与后 4 位。"""
     if not secret:
         return "（未设置）"
     if len(secret) <= 10:
@@ -33,6 +34,7 @@ def mask(secret: str) -> str:
 
 
 def main() -> int:
+    """打印当前 LLM 配置并做连通性测试；带 --demo 时额外跑 Listing 与视频看效果。"""
     load_env()
 
     import os

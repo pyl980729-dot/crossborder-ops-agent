@@ -20,6 +20,7 @@ _FMT = "%(asctime)s | %(levelname)-7s | %(name)-18s | %(message)s"
 
 
 def setup_logging(level: str = "INFO") -> None:
+    """初始化根日志：控制台 + 5MB×3 滚动文件，并压掉第三方噪音；只执行一次。"""
     global _CONFIGURED
     if _CONFIGURED:
         return
@@ -49,4 +50,5 @@ def setup_logging(level: str = "INFO") -> None:
 
 
 def get_logger(name: str) -> logging.Logger:
+    """按模块名取 logger。"""
     return logging.getLogger(name)

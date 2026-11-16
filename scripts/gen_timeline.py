@@ -54,6 +54,7 @@ def _ramp(day: int, lo: float, hi: float) -> float:
 
 
 def gen_ads_daily() -> list[dict]:
+    """按 30 天生成每个广告组的日报，最近 14 天做线性过渡以形成趋势。"""
     rows: list[dict] = []
     for name, impr, clicks, cost, revenue, aov, rev_shape, cost_shape in CAMPAIGNS:
         for day in range(DAYS):
@@ -131,6 +132,7 @@ def gen_reviews_daily() -> list[dict]:
 
 
 def write(name: str, rows: list[dict]) -> None:
+    """写 CSV 并打印行数与实际日期跨度，便于确认数据覆盖范围。"""
     path = BASE / name
     with path.open("w", encoding="utf-8", newline="") as fh:
         writer = csv.DictWriter(fh, fieldnames=list(rows[0].keys()))

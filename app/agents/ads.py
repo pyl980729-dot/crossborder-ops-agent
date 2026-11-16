@@ -18,9 +18,11 @@ from app.core.platforms import get_platform
 
 
 class AdsAgent(StageAgent):
+    """06 广告诊断：按固定顺序分级、出动作、发回流，绝不触碰广告后台。"""
     key = "ads"
 
     def _run(self, payload: dict) -> StageResult:
+        """读广告报表 → 合成阈值 → 取近 N 天窗口诊断 → 输出分级、动作与回流指令。"""
         platform = get_platform(payload.get("platform"))
         # 阈值按「请求 > 界面设置 > 平台预设 > 系统默认」四层合成
         cfg = config.load_config(payload.get("platform"), payload.get("thresholds"))
@@ -435,6 +437,7 @@ class AdsAgent(StageAgent):
 
     @staticmethod
     def _dominant_stage(campaigns: list[dict]) -> str:
+        """统计 P1 组里最常见的失血环节，用一句人话说清「该改哪一层」。"""
         from collections import Counter
 
         labels = {

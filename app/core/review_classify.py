@@ -107,6 +107,7 @@ LLM_BATCH = 20
 
 
 def _normalize(text: str) -> str:
+    """统一转小写，供关键词包含匹配使用。"""
     return str(text or "").lower()
 
 
@@ -137,6 +138,7 @@ def classify_by_rules(text: str) -> tuple[str, int, str]:
 
 
 def _rule_confidence(hits: int) -> tuple[str, float]:
+    """按命中关键词数给置信度：3 个以上 high，2 个 medium，1 个 low。"""
     if hits >= 3:
         return "high", 0.9
     if hits == 2:

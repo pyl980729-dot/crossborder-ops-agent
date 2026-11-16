@@ -74,6 +74,7 @@ class Cron:
     RANGES = ((0, 59), (0, 23), (1, 31), (1, 12), (0, 7))
 
     def __init__(self, expr: str):
+        """解析五字段表达式；周字段里的 7 归一成 0（周日）。"""
         parts = (expr or "").split()
         if len(parts) != 5:
             raise CronError("cron 必须是 5 个字段：分 时 日 月 周")
@@ -96,6 +97,7 @@ class Cron:
         return (dt.weekday() + 1) % 7
 
     def matches(self, dt: datetime) -> bool:
+        """判断某个时间点是否命中该表达式（分钟精度）。"""
         return (
             dt.minute in self.minutes
             and dt.hour in self.hours

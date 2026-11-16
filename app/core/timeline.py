@@ -63,6 +63,7 @@ def _month_of(token: str) -> int | None:
 
 
 def _full_year(value: int) -> int:
+    """两位年份补全：68 以前算 2000 年代，避免把 26 年解析成 1926。"""
     if value >= 100:
         return value
     # 两位年份：跨境报表基本不会出现 1969 年的数据
@@ -70,6 +71,7 @@ def _full_year(value: int) -> int:
 
 
 def _safe_date(y: int, m: int, d: int) -> date | None:
+    """构造日期，非法组合（如 2 月 30 日）返回 None 而不是抛错。"""
     try:
         return date(y, m, d)
     except ValueError:

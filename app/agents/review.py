@@ -27,9 +27,11 @@ FIX_PLAYBOOK = {
 
 
 class ReviewAgent(StageAgent):
+    """07 评论归因：先把差评分到八类，再把可修复的部分变成可排期的动作。"""
     key = "review"
 
     def _run(self, payload: dict) -> StageResult:
+        """自动归因 → 聚合统计 → 做 28 天同长度对比 → 按八类 playbook 出动作与回流。"""
         cfg = config.load_config(payload.get("platform"), payload.get("thresholds"))
 
         # 先自动归因，再做统计 —— 真实导出的评论表只有评分和正文，没有分类列

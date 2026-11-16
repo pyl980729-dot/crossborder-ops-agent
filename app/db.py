@@ -108,6 +108,7 @@ DEFAULT_STORE = "default"
 
 
 def _connect() -> sqlite3.Connection:
+    """建立连接并把行工厂设为 sqlite3.Row，便于按列名取值。"""
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
@@ -126,6 +127,7 @@ def _open():
 
 
 def init_db() -> None:
+    """建表 + 补列迁移 + 兜底默认店铺，服务启动时调用一次。"""
     with _open() as conn:
         conn.executescript(SCHEMA)
         for sql in MIGRATIONS:
@@ -141,6 +143,7 @@ def init_db() -> None:
 
 
 def new_run_id() -> str:
+    """生成 12 位短 id；运行、数据集、定时任务共用。"""
     return uuid.uuid4().hex[:12]
 
 
@@ -157,6 +160,7 @@ def save_run(
     trigger: str = "manual",
     store_id: str = DEFAULT_STORE,
 ) -> None:
+    """落库一次运行：输入与结果都存，任何一次运行都能复现。"""
     with _open() as conn:
         conn.execute(
             """INSERT OR REPLACE INTO runs
@@ -181,6 +185,7 @@ def save_run(
 
 
 def get_run(run_id: str) -> dict | None:
+    """按 id 读运行详情；老库缺列时给默认值。"""
     with _open() as conn:
         row = conn.execute("SELECT * FROM runs WHERE id = ?", (run_id,)).fetchone()
     if not row:
@@ -202,6 +207,7 @@ def get_run(run_id: str) -> dict | None:
 
 
 def list_runs(limit: int = 20, store_id: str = DEFAULT_STORE) -> list[dict]:
+    """某店铺最近 N 次运行（不含大字段），按插入顺序倒序。"""
     with _open() as conn:
         rows = conn.execute(
             "SELECT id, created_at, title, status, stages, elapsed_ms, llm_mode, trigger "
@@ -212,6 +218,7 @@ def list_runs(limit: int = 20, store_id: str = DEFAULT_STORE) -> list[dict]:
 
 
 def stats(store_id: str = DEFAULT_STORE) -> dict:
+    """某店铺的运行总数、成功数与定时触发数。"""
     with _open() as conn:
         total = conn.execute("SELECT COUNT(*) AS c FROM runs WHERE store_id = ?", (store_id,)).fetchone()["c"]
         ok = conn.execute(
@@ -234,6 +241,7 @@ def _setting_key(store_id: str, key: str) -> str:
 
 
 def get_settings(store_id: str = DEFAULT_STORE) -> dict[str, str]:
+    """读某店铺的阈值覆盖，返回 {阈值键: 值}。"""
     prefix = _setting_key(store_id, "")
     with _open() as conn:
         rows = conn.execute(
@@ -243,6 +251,7 @@ def get_settings(store_id: str = DEFAULT_STORE) -> dict[str, str]:
 
 
 def save_settings(values: dict, store_id: str = DEFAULT_STORE) -> None:
+    """写入 / 覆盖阈值，键带店铺前缀以隔离多租户。"""
     now = datetime.now(timezone.utc).isoformat(timespec="seconds")
     with _open() as conn:
         for key, value in values.items():
@@ -253,6 +262,7 @@ def save_settings(values: dict, store_id: str = DEFAULT_STORE) -> None:
 
 
 def delete_setting(key: str, store_id: str = DEFAULT_STORE) -> None:
+    """删除单条覆盖（恢复默认）。"""
     with _open() as conn:
         conn.execute("DELETE FROM settings WHERE key = ?", (_setting_key(store_id, key),))
 
@@ -268,6 +278,7 @@ def save_dataset(
     did: str, kind: str, filename: str, rows: list[dict], mapping: dict,
     store_id: str = DEFAULT_STORE,
 ) -> dict:
+    """把解析后的行写成 JSON 落盘，并记录列名映射与行数。"""
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     path = UPLOAD_DIR / f"{did}.json"
     path.write_text(json.dumps(rows, ensure_ascii=False), encoding="utf-8")
@@ -284,6 +295,7 @@ def save_dataset(
 
 
 def list_datasets(kind: str | None = None, store_id: str = DEFAULT_STORE) -> list[dict]:
+    """某店铺的数据集列表，可按 kind 过滤。"""
     sql = "SELECT id, kind, filename, row_count, mapping_json, created_at FROM datasets WHERE store_id = ?"
     params: tuple = (store_id,)
     if kind:
@@ -323,6 +335,7 @@ def load_dataset_rows(did: str, store_id: str | None = None) -> list[dict] | Non
 
 
 def delete_dataset(did: str, store_id: str | None = None) -> bool:
+    """删除记录与落盘文件；带店铺校验，防止跨店删除。"""
     with _open() as conn:
         if store_id:
             row = conn.execute(
@@ -345,6 +358,7 @@ def delete_dataset(did: str, store_id: str | None = None) -> bool:
 # ---------------------------------------------------------------------------
 
 def create_schedule(sid: str, name: str, cron: str, payload: dict, store_id: str = DEFAULT_STORE) -> None:
+    """新建定时任务，默认启用。"""
     with _open() as conn:
         conn.execute(
             "INSERT INTO schedules (id, name, cron, payload_json, enabled, created_at, store_id) "
@@ -361,6 +375,7 @@ def create_schedule(sid: str, name: str, cron: str, payload: dict, store_id: str
 
 
 def list_schedules(store_id: str = DEFAULT_STORE) -> list[dict]:
+    """某店铺的定时任务列表。"""
     with _open() as conn:
         rows = conn.execute(
             "SELECT id, name, cron, enabled, created_at, last_run_at, last_run_id, store_id "
@@ -387,6 +402,7 @@ def list_schedules_all() -> list[dict]:
 
 
 def get_schedule(sid: str) -> dict | None:
+    """按 id 取任务详情（含 payload）。"""
     with _open() as conn:
         row = conn.execute("SELECT * FROM schedules WHERE id = ?", (sid,)).fetchone()
     if not row:
@@ -404,16 +420,19 @@ def get_schedule(sid: str) -> dict | None:
 
 
 def set_schedule_enabled(sid: str, enabled: bool) -> None:
+    """启用 / 暂停任务。"""
     with _open() as conn:
         conn.execute("UPDATE schedules SET enabled = ? WHERE id = ?", (1 if enabled else 0, sid))
 
 
 def delete_schedule(sid: str) -> None:
+    """删除定时任务。"""
     with _open() as conn:
         conn.execute("DELETE FROM schedules WHERE id = ?", (sid,))
 
 
 def touch_schedule(sid: str, run_id: str, at: str) -> None:
+    """推进 last_run_at 与 last_run_id；「错过的只补一次」就靠这里。"""
     with _open() as conn:
         conn.execute(
             "UPDATE schedules SET last_run_at = ?, last_run_id = ? WHERE id = ?",
@@ -448,6 +467,7 @@ def previous_run(
 
 
 def _row_to_run(row: sqlite3.Row) -> dict:
+    """把 runs 行转成闭环对比需要的形状。"""
     return {
         "id": row["id"],
         "created_at": row["created_at"],
@@ -463,11 +483,13 @@ def _row_to_run(row: sqlite3.Row) -> dict:
 # ---------------------------------------------------------------------------
 
 def count_users() -> int:
+    """用户总数；为 0 时系统处于开放模式。"""
     with _open() as conn:
         return conn.execute("SELECT COUNT(*) AS c FROM users").fetchone()["c"]
 
 
 def create_user(uid: str, username: str, display_name: str, role: str, password_hash: str) -> None:
+    """新增用户；密码只存哈希，不存明文。"""
     with _open() as conn:
         conn.execute(
             "INSERT INTO users (id, username, display_name, role, password_hash, created_at) "
@@ -478,6 +500,7 @@ def create_user(uid: str, username: str, display_name: str, role: str, password_
 
 
 def _user_row(row) -> dict:
+    """用户行转公开字段，刻意不含密码哈希。"""
     return {
         "id": row["id"],
         "username": row["username"],
@@ -488,6 +511,7 @@ def _user_row(row) -> dict:
 
 
 def get_user_by_username(username: str) -> dict | None:
+    """按用户名取用户，含密码哈希，仅供登录校验使用。"""
     with _open() as conn:
         row = conn.execute("SELECT * FROM users WHERE username = ?", (username,)).fetchone()
     if not row:
@@ -496,12 +520,14 @@ def get_user_by_username(username: str) -> dict | None:
 
 
 def get_user(uid: str) -> dict | None:
+    """按 id 取用户公开信息。"""
     with _open() as conn:
         row = conn.execute("SELECT * FROM users WHERE id = ?", (uid,)).fetchone()
     return _user_row(row) if row else None
 
 
 def list_users() -> list[dict]:
+    """全部用户（跨店铺），成员管理用。"""
     with _open() as conn:
         rows = conn.execute("SELECT * FROM users ORDER BY created_at").fetchall()
     return [_user_row(r) for r in rows]
@@ -509,6 +535,7 @@ def list_users() -> list[dict]:
 
 def update_user(uid: str, role: str | None = None, display_name: str | None = None,
                 password_hash: str | None = None) -> None:
+    """按传入字段局部更新；空值表示这一项不改。"""
     sets, params = [], []
     if role:
         sets.append("role = ?")
@@ -527,6 +554,7 @@ def update_user(uid: str, role: str | None = None, display_name: str | None = No
 
 
 def delete_user(uid: str) -> None:
+    """删除用户及其会话与店铺关系。"""
     with _open() as conn:
         conn.execute("DELETE FROM users WHERE id = ?", (uid,))
         conn.execute("DELETE FROM sessions WHERE user_id = ?", (uid,))
@@ -536,6 +564,7 @@ def delete_user(uid: str) -> None:
 # ---- 会话 ----
 
 def create_session(token: str, user_id: str, store_id: str | None, expires_at: str) -> None:
+    """写入会话，并记录它绑定的店铺。"""
     with _open() as conn:
         conn.execute(
             "INSERT INTO sessions (token, user_id, store_id, expires_at, created_at) "
@@ -546,17 +575,20 @@ def create_session(token: str, user_id: str, store_id: str | None, expires_at: s
 
 
 def get_session(token: str) -> dict | None:
+    """按 token 取会话。"""
     with _open() as conn:
         row = conn.execute("SELECT * FROM sessions WHERE token = ?", (token,)).fetchone()
     return dict(row) if row else None
 
 
 def delete_session(token: str) -> None:
+    """删除会话（登出）。"""
     with _open() as conn:
         conn.execute("DELETE FROM sessions WHERE token = ?", (token,))
 
 
 def purge_expired_sessions(now: str) -> None:
+    """清理已过期会话。"""
     with _open() as conn:
         conn.execute("DELETE FROM sessions WHERE expires_at < ?", (now,))
 
@@ -564,18 +596,21 @@ def purge_expired_sessions(now: str) -> None:
 # ---- 店铺 ----
 
 def list_stores() -> list[dict]:
+    """全部店铺。"""
     with _open() as conn:
         rows = conn.execute("SELECT * FROM stores ORDER BY created_at").fetchall()
     return [dict(r) for r in rows]
 
 
 def get_store(store_id: str) -> dict | None:
+    """按 id 取店铺。"""
     with _open() as conn:
         row = conn.execute("SELECT * FROM stores WHERE id = ?", (store_id,)).fetchone()
     return dict(row) if row else None
 
 
 def create_store(sid: str, name: str, platform: str) -> None:
+    """新建店铺。"""
     with _open() as conn:
         conn.execute(
             "INSERT INTO stores (id, name, platform, created_at) VALUES (?, ?, ?, ?)",
@@ -584,6 +619,7 @@ def create_store(sid: str, name: str, platform: str) -> None:
 
 
 def delete_store(sid: str) -> None:
+    """删除店铺及其成员关系；默认店铺不允许删。"""
     if sid == DEFAULT_STORE:
         return  # 默认店铺不允许删
     with _open() as conn:
@@ -594,6 +630,7 @@ def delete_store(sid: str) -> None:
 # ---- 成员关系 ----
 
 def add_membership(user_id: str, store_id: str) -> None:
+    """建立用户-店铺关系，重复插入忽略。"""
     with _open() as conn:
         conn.execute(
             "INSERT OR IGNORE INTO memberships (user_id, store_id, created_at) VALUES (?, ?, ?)",
@@ -602,6 +639,7 @@ def add_membership(user_id: str, store_id: str) -> None:
 
 
 def list_user_stores(user_id: str) -> list[dict]:
+    """某用户可访问的店铺。"""
     with _open() as conn:
         rows = conn.execute(
             "SELECT s.id, s.name, s.platform FROM memberships m "
@@ -612,6 +650,7 @@ def list_user_stores(user_id: str) -> list[dict]:
 
 
 def list_store_members(store_id: str) -> list[dict]:
+    """某店铺的成员列表。"""
     with _open() as conn:
         rows = conn.execute(
             "SELECT u.id, u.username, u.display_name, u.role, m.created_at "
@@ -623,6 +662,7 @@ def list_store_members(store_id: str) -> list[dict]:
 
 
 def list_all_memberships() -> list[dict]:
+    """全部用户-店铺关系，调度与自检用。"""
     with _open() as conn:
         rows = conn.execute("SELECT * FROM memberships").fetchall()
     return [dict(r) for r in rows]

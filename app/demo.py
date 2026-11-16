@@ -30,6 +30,7 @@ def _read_csv(name: str, fallback: str | None = None) -> list[dict]:
 
 
 def build_demo_payload() -> dict:
+    """读种子 CSV 并转成正确类型，拼成一次完整运行的 payload。"""
     products = _read_csv("category_scooter.csv")
     for row in products:
         row["price"] = float(row["price"])

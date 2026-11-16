@@ -17,9 +17,11 @@ from app.core.platforms import get_platform
 
 
 class StrategyAgent(StageAgent):
+    """02 选品与定价：用费率结构算贡献毛利、盈亏线 ROAS 与 SKU 四角色。"""
     key = "strategy"
 
     def _run(self, payload: dict) -> StageResult:
+        """调 pricing_model / sku_matrix，输出净利率体检、止损线与定价动作。"""
         platform = get_platform(payload.get("platform"))
         cfg = config.load_config(payload.get("platform"), payload.get("thresholds"))
         price = float(payload["target_price"])

@@ -86,6 +86,7 @@ PRESETS: dict[str, dict] = {
 
 @dataclass
 class LLMResult:
+    """一次生成的结果：文本、供应商、是否成功、错误信息。"""
     text: str
     provider: str
     ok: bool
@@ -102,9 +103,11 @@ class RuleProvider:
     last_error = ""
 
     def available(self) -> bool:
+        """离线模式永远可用 —— 它不调用任何外部服务。"""
         return True
 
     def generate(self, system: str, user: str, max_tokens: int = 900) -> LLMResult:
+        """离线模式不生成自由文本，返回 ok=False，由调用方回落规则模板。"""
         return LLMResult(text="", provider=self.name, ok=False, error="rule 模式不生成自由文本")
 
 
@@ -112,6 +115,7 @@ class OpenAICompatProvider:
     """任意 OpenAI 兼容端点（百炼 / OpenAI / DeepSeek / 本地 vLLM）。"""
 
     def __init__(self, base_url: str, api_key: str, model: str, label: str = ""):
+        """初始化任意 OpenAI 兼容端点，并保留最后一次错误供排查。"""
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
         self.model = model
@@ -120,11 +124,13 @@ class OpenAICompatProvider:
         self.last_error = ""
 
     def available(self) -> bool:
+        """有 API Key 才算可用。"""
         return bool(self.api_key)
 
     def generate(
         self, system: str, user: str, max_tokens: int = 900, temperature: float = 0.5
     ) -> LLMResult:
+        """发一次 chat/completions 请求；任何失败都返回 ok=False，不向上抛异常。"""
         payload = {
             "model": self.model,
             "messages": [
@@ -215,6 +221,7 @@ def get_provider(force_reload: bool = False):
 
 
 def provider_info() -> dict:
+    """当前 provider 的公开信息：模式、标签、模型、端点、最后一次错误。"""
     p = get_provider()
     return {
         "name": p.name,

@@ -20,6 +20,7 @@ class MetricError(ValueError):
     """指标计算前置条件不满足（缺字段/类型非法/除零保护）。"""
 
     def __init__(self, message: str, field: str = ""):
+        """带上出错字段，便于上层定位是哪个输入不合法。"""
         super().__init__(message)
         self.field = field
 
@@ -56,6 +57,7 @@ def pct(value: float, digits: int = 1) -> str:
 
 
 def _money(value: float) -> float:
+    """金额统一保留两位小数。"""
     return round(float(value), 2)
 
 
