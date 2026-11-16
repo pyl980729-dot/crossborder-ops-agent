@@ -3,14 +3,18 @@ __pycache__/
 *.py[cod]
 data/app.db
 .env
+.env.production
 .DS_Store
 .idea/
 .vscode/
 
-# 求职材料（不随公开仓库分发）
-RESUME.md
+# 内部材料（不随交付包分发）
+docs/internal/
+.workbuddy/
 
 # 运行时产物
 data/logs/
 data/uploads/
+data/backups/
 tmp_test/
+dist/

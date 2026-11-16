@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -17,6 +18,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from app import db
 from app.core import auth
 
+# 测试库隔离：用户、会话、店铺都建在临时库里，不影响 data/app.db
+_TMP = Path(tempfile.mkdtemp(prefix="ecom-test-"))
+db.DB_PATH = _TMP / "app.db"
+db.UPLOAD_DIR = _TMP / "uploads"
 db.init_db()
 
 

@@ -17,6 +17,10 @@ import io
 import re
 from typing import Any
 
+from app.core.logging import get_logger
+
+log = get_logger("datasets")
+
 MAX_ROWS = 50_000
 
 # 字段 → 可能出现的列名（全部小写比较）
@@ -318,6 +322,13 @@ def parse_csv(raw: bytes, kind: str, order: str | None = None) -> dict:
         raise DatasetError("没有解析出任何有效数据行，请检查数值列是否为空")
 
     date_info = _normalize_dates(rows, mapping, warnings, order)
+
+    log.info(
+        "parse kind=%s rows=%d skipped=%d ignored=%d date=%s warnings=%d",
+        kind, len(rows), skipped, len(ignored),
+        date_info["first"] + "~" + date_info["last"] if date_info else "无",
+        len(warnings),
+    )
 
     return {
         "ok": True,

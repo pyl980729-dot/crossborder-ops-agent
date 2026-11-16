@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -12,6 +13,10 @@ from app import db
 from app.core import config
 from app.core import metrics as M
 
+# 测试库隔离：阈值覆盖写在临时库里，不污染正在使用的配置
+_TMP = Path(tempfile.mkdtemp(prefix="ecom-test-"))
+db.DB_PATH = _TMP / "app.db"
+db.UPLOAD_DIR = _TMP / "uploads"
 db.init_db()
 
 

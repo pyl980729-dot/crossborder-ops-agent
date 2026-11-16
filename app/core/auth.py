@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import os
 import secrets
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -68,6 +69,18 @@ PBKDF2_ROUNDS = 100_000
 def can(role: str, permission: str) -> bool:
     """判断角色是否拥有某权限。"""
     return role in PERMISSIONS.get(permission, set())
+
+
+def require_login() -> bool:
+    """是否强制登录。
+
+    默认关闭：库里没有用户时按「开放模式」把匿名访问视为负责人，
+    保证 clone 下来就能演示。
+
+    对外部署时设 ECOM_REQUIRE_LOGIN=1：即使库里还没有用户，
+    除初始化与登录接口外一律 401 —— 避免「忘了建账号」变成「系统裸奔」。
+    """
+    return (os.getenv("ECOM_REQUIRE_LOGIN") or "").strip().lower() in ("1", "true", "yes", "on")
 
 
 def permission_for_config_group(group: str) -> str:

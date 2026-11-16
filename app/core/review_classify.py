@@ -15,6 +15,9 @@ import json
 import re
 
 from app.core.llm import try_generate
+from app.core.logging import get_logger
+
+log = get_logger("review_classify")
 
 # 八类归因的关键词库（中文 / 英文 / 葡语）
 # 跨境场景必须三语覆盖：巴西站评论是葡语，亚马逊是英语，内部复盘是中文
@@ -274,4 +277,13 @@ def classify_batch(reviews: list[dict], use_llm: bool = True) -> tuple[list[dict
     stats["auto"] = stats["rule_high"] + stats["rule_medium"] + stats["rule_low"] + stats["llm"]
     # 覆盖率的分母是「需要归因的评论数」，不是全部评论
     stats["coverage"] = round(stats["auto"] / stats["needing"], 4) if stats["needing"] else 0.0
+
+    log.info(
+        "classify total=%d needing=%d auto=%d rule=%d/%d/%d llm=%d manual=%d pending=%d "
+        "not_needed=%d coverage=%.3f",
+        stats["total"], stats["needing"], stats["auto"],
+        stats["rule_high"], stats["rule_medium"], stats["rule_low"],
+        stats["llm"], stats["manual"], stats["pending"], stats["not_needed"],
+        stats["coverage"],
+    )
     return out, stats

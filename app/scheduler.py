@@ -17,6 +17,9 @@ from datetime import datetime
 
 from app import db
 from app.core.cron import Cron, CronError
+from app.core.logging import get_logger
+
+log = get_logger("scheduler")
 
 
 class Scheduler:
@@ -54,6 +57,7 @@ class Scheduler:
                 self.tick()
             except Exception:  # noqa: BLE001 线程不能因为单次异常而退出
                 self.last_error = traceback.format_exc(limit=2)[-300:]
+                log.exception("scheduler tick 失败")
             self._stop.wait(self.tick_seconds)
 
     # ---- 核心 ----
@@ -73,6 +77,8 @@ class Scheduler:
                     cron = Cron(sched["cron"])
                 except CronError as exc:
                     self.last_error = f"任务 {sched['name']} cron 非法: {exc}"
+                    log.warning("schedule invalid id=%s name=%s cron=%s err=%s",
+                                sched["id"], sched["name"], sched["cron"], exc)
                     continue
 
                 anchor = self._anchor(sched)
@@ -126,6 +132,10 @@ class Scheduler:
             db.touch_schedule(sched["id"], result["run_id"], started_at)
             self.executed_count += 1
             self.last_error = ""
+            log.info(
+                "schedule done id=%s name=%s run_id=%s status=%s",
+                sched["id"], sched["name"], result["run_id"], result["status"],
+            )
             return {
                 "schedule_id": sched["id"],
                 "name": sched["name"],
@@ -137,6 +147,7 @@ class Scheduler:
         except Exception as exc:  # noqa: BLE001
             db.touch_schedule(sched["id"], "", started_at)  # 推进时间，避免每分钟重试
             self.last_error = f"{type(exc).__name__}: {exc}"
+            log.exception("schedule failed id=%s name=%s", sched["id"], sched["name"])
             return {
                 "schedule_id": sched["id"],
                 "name": sched["name"],

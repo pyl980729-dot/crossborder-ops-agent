@@ -21,6 +21,9 @@ from app.core.contracts import (
     StageResult,
     missing_fields,
 )
+from app.core.logging import get_logger
+
+log = get_logger("stage")
 
 
 class StageAgent:
@@ -53,15 +56,26 @@ class StageAgent:
 
     # ---- 执行 ----
     def run(self, payload: dict) -> StageResult:
-        """模板方法：check → _run → 计时；计算异常也转成可读的 blocked，不让接口 500。"""
+        """模板方法：check → _run → 计时；计算异常也转成可读的 blocked，不让接口 500。
+
+        每个 Stage 的运行结果都在这里落一条日志 —— 七个模块共用同一个埋点，
+        格式统一，排查时按 stage=xxx 过滤即可。
+        """
         started = time.perf_counter()
         missing = self.check(payload)
         if missing:
-            return self.blocked(missing)
+            result = self.blocked(missing)
+            result.elapsed_ms = int((time.perf_counter() - started) * 1000)
+            log.warning(
+                "stage=%s status=blocked elapsed_ms=%d missing=%s",
+                self.key, result.elapsed_ms, ",".join(missing),
+            )
+            return result
 
         try:
             result = self._run(payload)
         except Exception as exc:  # 契约之外的计算失败也要可读，不能 500
+            log.exception("stage=%s status=error", self.key)
             result = StageResult(
                 stage=self.key,
                 title=self.title,
@@ -69,7 +83,18 @@ class StageAgent:
                 headline=f"计算失败：{type(exc).__name__}: {exc}",
                 missing=[],
             )
-        result.elapsed_ms = int((time.perf_counter() - started) * 1000)  # type: ignore[attr-defined]
+        result.elapsed_ms = int((time.perf_counter() - started) * 1000)
+        log.info(
+            "stage=%s status=%s elapsed_ms=%d insights=%d actions=%d p0=%d feedback=%d | %s",
+            self.key,
+            result.status,
+            result.elapsed_ms,
+            len(result.insights),
+            len(result.actions),
+            sum(1 for a in result.actions if a.priority == "P0"),
+            len(result.feedback),
+            (result.headline or "").replace("\n", " ")[:120],
+        )
         return result
 
     def _run(self, payload: dict) -> StageResult:  # pragma: no cover - 子类实现

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -13,6 +14,10 @@ from app import db
 from app.demo import build_demo_payload
 from app.orchestrator import run_single, run_stages
 
+# 测试库隔离：整个测试跑在临时目录里，绝不往 data/app.db 写演示数据
+_TMP = Path(tempfile.mkdtemp(prefix="ecom-test-"))
+db.DB_PATH = _TMP / "app.db"
+db.UPLOAD_DIR = _TMP / "uploads"
 db.init_db()
 
 

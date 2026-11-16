@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile
 from pydantic import BaseModel, Field
 
@@ -416,10 +418,12 @@ def _set_session_cookie(response: Response, token: str) -> None:
 def auth_status() -> dict:
     """未登录也能看：系统是否已初始化、有哪些店铺。前端用它决定显示登录页还是初始化页。"""
     users = db.count_users()
+    force_login = auth.require_login()
     return {
         "initialized": users > 0,
         "user_count": users,
-        "open_mode": users == 0 and not __import__("os").getenv("ECOM_API_TOKEN"),
+        "open_mode": users == 0 and not os.getenv("ECOM_API_TOKEN") and not force_login,
+        "require_login": force_login,
         "stores": [{"id": s["id"], "name": s["name"], "platform": s["platform"]} for s in db.list_stores()],
         "roles": [
             {"key": r, "label": auth.ROLE_LABELS[r], "desc": auth.ROLE_DESC[r]}

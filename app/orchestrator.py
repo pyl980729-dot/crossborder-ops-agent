@@ -23,6 +23,9 @@ from app.agents.strategy import StrategyAgent
 from app.agents.video import VideoAgent
 from app.core import cycle
 from app.core.contracts import BACKFLOW_MAP, STAGE_ORDER, StageResult
+from app.core.logging import get_logger
+
+log = get_logger("orchestrator")
 
 REGISTRY: dict[str, StageAgent] = {
     "market": MarketAgent(),
@@ -91,6 +94,11 @@ def run_stages(
     run_id = run_id or db.new_run_id()
     ran_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
 
+    log.info(
+        "run start run_id=%s stages=%d trigger=%s store=%s schedule=%s",
+        run_id, len(stages), trigger, store_id, schedule_id or "-",
+    )
+
     results: dict[str, StageResult] = {}
     ordered: list[dict] = []
 
@@ -128,6 +136,12 @@ def run_stages(
         else:
             merged[key] = {**item, "count": 1, "reasons": [item["reason"]]}
     backflow = list(merged.values())
+
+    for item in backflow:
+        log.info(
+            "backflow from=%s to=%s count=%d scope=%s",
+            item["from_stage"], item["to_stage"], item["count"], item["scope"],
+        )
 
     blocked = [r.stage for r in results.values() if r.status == "blocked"]
     partial = [r.stage for r in results.values() if r.status == "partial"]
@@ -186,6 +200,22 @@ def run_stages(
         schedule_id=schedule_id,
         trigger=trigger,
         store_id=store_id,
+    )
+
+    log.info(
+        "run done run_id=%s status=%s elapsed_ms=%d ok=%d/%d partial=%d blocked=%d "
+        "actions=%d p0=%d insights=%d backflow=%d baseline=%s",
+        run_id, status, elapsed,
+        summary["ok"], summary["stage_count"], summary["partial"], summary["blocked"],
+        summary["action_total"], summary["p0_total"], summary["insight_total"],
+        summary["backflow_count"], prev["id"] if prev else "-",
+    )
+    score = cycle_report.get("score") or {}
+    log.info(
+        "run cycle run_id=%s verdict=%s better=%d worse=%d stale_p0=%d",
+        run_id, cycle_report.get("verdict", "-"),
+        score.get("better", 0), score.get("worse", 0),
+        len((cycle_report.get("pending") or {}).get("stale") or []),
     )
     return result_payload
 

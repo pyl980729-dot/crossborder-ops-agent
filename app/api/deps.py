@@ -70,7 +70,9 @@ def resolve_principal(request: Request) -> Principal:
             )
 
     # ---- 3. 开放模式 ----
-    if db.count_users() == 0 and not service_token:
+    # 强制登录模式下不启用「无用户即 owner」的兜底：
+    # 对外部署时忘了建账号，不能等于系统裸奔。
+    if db.count_users() == 0 and not service_token and not auth.require_login():
         store_id = _first_store_id()
         store = db.get_store(store_id)
         return Principal(

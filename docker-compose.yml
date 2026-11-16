@@ -6,8 +6,13 @@ services:
     ports:
       - "8000:8000"
     environment:
-      # 留空 = 开放模式（本机演示用）。对外暴露时务必设置。
+      # 留空 = 开放模式（本机演示用）。对外暴露时务必设置后两项。
       ECOM_API_TOKEN: ${ECOM_API_TOKEN:-}
+      # 强制登录：1 = 即使库里没有用户，除初始化/登录外一律 401
+      ECOM_REQUIRE_LOGIN: ${ECOM_REQUIRE_LOGIN:-0}
+      # 允许的跨域来源，生产环境不要留空
+      ECOM_CORS_ORIGINS: ${ECOM_CORS_ORIGINS:-}
+      ECOM_SCHEDULER: ${ECOM_SCHEDULER:-on}
       ECOM_LLM_PROVIDER: ${ECOM_LLM_PROVIDER:-rule}
       ECOM_LLM_MODEL: ${ECOM_LLM_MODEL:-qwen-plus}
       DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY:-}

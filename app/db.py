@@ -1,7 +1,7 @@
 """持久层 —— sqlite3 标准库，零外部依赖。
 
-选 SQLite 不是为了偷懒：这是一个可以拷走就演示的系统，
-评审/面试官 clone 下来 `python run.py` 就能跑，不需要装数据库。
+选 SQLite 不是为了偷懒：这是一个拷贝到任意机器就能运行的系统，
+不依赖外部数据库服务，也不需要额外的运维配合。
 """
 
 from __future__ import annotations
